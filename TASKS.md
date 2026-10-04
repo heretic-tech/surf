@@ -49,7 +49,33 @@ something; link the PR / commit that picks it up.
       code never sees `Runtime.enable`. Needs a design note on the observable
       side effects before implementation.
 - [ ] Frames API: `frame("name")` / iframe targeting with isolated worlds per
-      frame; `Page.frameAttached` tracking.
+      frame; `Page.frameAttached` tracking. Today every action resolves in
+      the main frame's world (`World::create(session, frame_id)` already
+      takes any frame id, so child-frame worlds are a registry away).
+- [ ] surf-browser proxy auth (`network::ProxyAuth`) is implemented from
+      the CDP docs but has no test: an authenticating proxy stub (HTTP 407
+      + `Proxy-Authenticate: Basic`) in `tests/common` would exercise
+      `Fetch.authRequired` → `continueWithAuth` and the "drop the Fetch
+      guard after the first proxy challenge" rule. Task 9 should also make
+      network hooks and `ProxyAuth` share one `Fetch.enable` (today each
+      sends its own; the last `enable` wins, so a hook enabling `Fetch`
+      without `handleAuthRequests` after a proxy page would switch auth
+      handling off).
+- [ ] surf-browser `fill()` sets text through select-all +
+      `Input.insertText`; `<input type=date|number|range|color|file>` need
+      value assignment / `DOM.setFileInputFiles` instead (Playwright-style).
+- [ ] surf-browser `text=` resolver walks light DOM only (no shadow roots);
+      CSS selectors likewise do not pierce shadow DOM.
+- [ ] surf-browser `Page.setLifecycleEventsEnabled` is on for every page
+      (needed to await `load` / `networkIdle`); it is a DevTools-only
+      stream, not page-observable, but worth a note in the detection gate.
+- [ ] surf-browser: `Element` handles are released with a spawned
+      `Runtime.releaseObject` on drop; a page that never navigates and
+      resolves millions of elements still accumulates nothing, but a
+      `Runtime.releaseObjectGroup("surf")` sweep on navigation would be
+      cheaper than per-handle releases if a profile shows it.
+- [ ] surf-browser: `pdf()` is headless-only (Chrome refuses
+      `Page.printToPDF` headed); surface a clear message in the runtime.
 
 ## Language
 - [ ] `schedule:` blocks (cron-like: `schedule every 5m:` / `schedule at

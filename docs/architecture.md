@@ -76,9 +76,9 @@ surf-syntax ──► surf-vm ──► surf-runtime ──► surf-browser ─�
 |------|-------------|
 | never `Runtime.enable`, never `DOM.enable` | `surf_cdp::FORBIDDEN_METHODS` (refused by `Session::call_raw` in every build; no typed command is generated for them), `Session::enable_domain` rejects `Runtime`/`DOM`; `surf-browser` only creates isolated worlds |
 | exact launch flags, no `--enable-automation`; the only `--disable-*` is `--disable-blink-features=AutomationControlled`, on launched browsers only (Decision 12) | `surf_browser::launch::LaunchConfig::args` (unit-tested; `tests/launch.rs` checks `navigator.webdriver === false`, no infobar, and that the switch is why) |
-| only `Page.enable` by default; `Network`/`Fetch` only while a hook exists | `surf_cdp::DomainGuard` ref-counting, owned by `surf_browser::network` hooks |
+| only `Page.enable` by default; `Network`/`Fetch` only while a hook or proxy auth needs them | `surf_cdp::DomainGuard` ref-counting, owned by `surf_browser::network` hooks / `ProxyAuth`; `tests/pages.rs::quiet_contract_only_page_enable_is_sent` traces a full session and asserts it |
 | pipe by default, no listening port unless `cdp: 9222` | `surf_browser::launch::CdpMode` → `TransportChoice` (`tests/launch.rs` runs `lsof -iTCP -sTCP:LISTEN -p <pid>`) |
-| no main-world injection; helpers in the isolated world under random names | `surf_browser::world`, `surf_browser::observer` |
+| no main-world injection; helpers in the isolated world under random names | `surf_browser::world` (resolver as `__surf_<random>` on the world global; `tests/pages.rs` checks the main world cannot see it), `surf_browser::observer` |
 
 ## Public contracts
 
@@ -418,28 +418,167 @@ profile (retrying while helper processes drain) and stop Xvfb. Dropping a
 `Launched` without `close()` kills the process and removes the temp
 profile best-effort.
 
-### surf-browser: Page / backing indirection (Decision 10)
+### surf-browser: Browser, pages, worlds, actions (task 4)
 
 ```rust
+pub struct Browser;                                   // one launched process or one attached connection
+impl Browser {
+    pub async fn launch(opts: LaunchOptions) -> Result<Rc<Browser>, BrowserError>;        // CdpMode::Attach → connect()
+    pub async fn connect(ws_url: &str, opts: LaunchOptions) -> Result<Rc<Browser>, BrowserError>;   // pool: / cdp: "ws://…"
+    pub async fn new_page(&self, opts: NewPageOptions { proxy, isolated, name }) -> Result<Page, BrowserError>;
+    pub async fn page(&self, index: usize) -> Result<Page, BrowserError>;           // creates every missing page up to index
+    pub async fn page_named(&self, name: &str) -> Result<Page, BrowserError>;       // creates + names when missing
+    pub async fn sole_page(&self) -> Result<Page, BrowserError>;                    // 0 → create; 1 → it; n → Ambiguous { names }
+    pub fn pages(&self) -> Vec<Page>;
+    pub async fn close_page(&self, page: &Page) -> Result<(), BrowserError>;
+    pub async fn create_backing(&self, context_id: Option<String>) -> Result<Backing, BrowserError>;
+    pub async fn rebind_page(&self, page: &Page, proxy: Option<&str>, migration: Migration) -> Result<(), BrowserError>;
+    pub async fn close(&self) -> Result<(), BrowserError>;                          // idempotent; attached browsers are never closed
+}
+
 pub struct Backing { pub session: Session, pub target_id: String, pub browser_context_id: Option<String>, pub frame_id: String }
-pub struct Migration { pub cookies: bool, pub storage: bool, pub url: bool }
+pub struct Migration { pub cookies: bool, pub storage: bool, pub url: bool }      // Migration::ALL
+pub enum WaitUntil { Load, DomContentLoaded, NetworkIdle, Commit }
+pub enum DialogPolicy { Accept, Dismiss, AcceptWith(String) }
 
 #[derive(Clone)] pub struct Page(Rc<PageInner>);   // stable handle; clones share state
 impl Page {
-    pub fn index(&self) -> usize;
-    pub fn backing(&self) -> Option<Backing>;
-    pub async fn world(&self) -> Result<World, BrowserError>;
+    pub async fn attach(index: usize, backing: Backing, timeout: Duration, credentials: Option<Credentials>) -> Result<Page, BrowserError>;
+    pub fn index(&self) -> usize;  pub fn name(&self) -> Option<String>;  pub fn label(&self) -> String;   // `1` or `"login"`
+    pub fn backing(&self) -> Option<Backing>;  pub fn session(&self) -> Result<Session, BrowserError>;  pub fn is_open(&self) -> bool;
+    pub fn timeout(&self) -> Duration;  pub fn set_timeout(&self, d: Duration);
+    pub async fn world(&self) -> Result<World, BrowserError>;  pub fn invalidate_world(&self);
+    pub async fn with_world<T>(&self, f: impl Fn(World) -> Fut) -> Result<T, BrowserError>;   // retries once on a destroyed context
+    pub async fn eval(&self, expression: &str) -> Result<serde_json::Value, BrowserError>;
+    pub async fn eval_fn(&self, function_source: &str, args: Vec<Value>) -> Result<Value, BrowserError>;
+    pub async fn goto(&self, url: &str, wait_until: WaitUntil) -> Result<(), BrowserError>;
+    pub async fn wait_for_navigation(&self, wait_until: WaitUntil) -> Result<(), BrowserError>;
+    pub async fn reload(&self, w: WaitUntil); pub async fn back(&self, w: WaitUntil) -> Result<bool, _>; pub async fn forward(&self, w: WaitUntil) -> Result<bool, _>;
+    pub async fn url(&self) -> Result<String, _>;  pub async fn title(&self) -> Result<String, _>;
+    pub fn on_dialog(&self, policy: DialogPolicy);  pub fn dialogs(&self) -> Vec<Dialog>;
+    pub async fn screenshot(&self, path: &Path, full_page: bool);  pub async fn screenshot_png(&self, full_page: bool) -> Result<Vec<u8>, _>;
+    pub async fn pdf(&self, path: &Path);  pub async fn pdf_bytes(&self) -> Result<Vec<u8>, _>;
+    pub async fn set_viewport(&self, w: u32, h: u32);
+    pub async fn cookies(&self) -> Result<Vec<Cookie>, _>;  pub async fn set_cookies(&self, &[Cookie]);  pub async fn clear_cookies(&self);
     pub async fn rebind(&self, new_backing: Backing, migration: Migration) -> Result<(), BrowserError>;
     pub async fn close(&self) -> Result<(), BrowserError>;
+    // actions.rs — every one takes `ActionOptions { timeout, delay }`
+    pub async fn click / dblclick / right_click / hover / focus / scroll_into_view(&self, selector: &str, opts);
+    pub async fn type_text / fill(&self, selector: &str, text: &str, opts);
+    pub async fn press(&self, key: &str);  pub async fn press_on(&self, selector: &str, key: &str, opts);
+    pub async fn check / uncheck(&self, selector, opts);  pub async fn select(&self, selector, values: &[&str], opts) -> Result<Vec<String>, _>;
+    pub async fn scroll_by / scroll_to(&self, x: f64, y: f64);
+    pub async fn text / html / value(&self, selector, opts) -> Result<String, _>;  pub async fn attr(&self, selector, name, opts) -> Result<Option<String>, _>;
+    pub async fn exists(&self, selector) -> Result<bool, _>;  pub async fn count(&self, selector) -> Result<usize, _>;   // no wait
+    pub async fn all(&self, selector) -> Result<Vec<Element>, _>;  pub async fn first(&self, selector) -> Result<Option<Element>, _>;
+    pub async fn wait(&self, selector, opts) -> Result<Element, _>;  pub async fn wait_gone / wait_text / wait_url(…);  pub async fn wait_for(&self, d: Duration);
 }
+
+pub struct Element;   // an objectId in the page's isolated world; same actions/readers without re-resolving; `all(sel)` scoped; released on drop
+
+pub struct World { pub session: Session, pub context_id: i64, pub name: String, pub frame_id: String, pub resolver: String }
+impl World {
+    pub async fn create(session: Session, frame_id: &str) -> Result<World, BrowserError>;     // Page.createIsolatedWorld + resolver install
+    pub async fn eval(&self, expression: &str) -> Result<Value, _>;                            // Runtime.evaluate{contextId}
+    pub async fn call(&self, function_declaration: &str, args: Vec<Value>) -> Result<Value, _>; // Runtime.callFunctionOn{executionContextId}
+    pub async fn call_handle(…) -> Result<RemoteObject, _>;  pub async fn call_on(&self, object_id, decl, args) -> Result<Value, _>;
+    pub async fn resolve(&self, sel: &Selector, all: bool) -> Result<Vec<String /* objectId */>, _>;
+    pub async fn add_binding(&self, name: &str) -> Result<(), _>;                              // Runtime.addBinding{executionContextId}
+    pub async fn release(&self, object_id: &str);  pub async fn release_all(&self);
+}
+
+pub enum Selector { Css(String), Text(String), XPath(String) }   // Selector::parse("#a" | "text=Buy now" | "xpath=//a" | "//a")
+pub enum BrowserError { …, Timeout { action, selector, waited_ms, last_state }, Script { text, line }, Ambiguous { names }, PageClosed { index }, … }
 ```
 
-`rebind` replaces `{session, target_id, browser_context_id, frame_id}` under
-the same handle, migrating cookies (`Storage.getCookies` / `setCookies`),
-`localStorage`/`sessionStorage` (isolated-world eval) and the URL. One
-mechanism serves supervisor restarts, `shift_proxy()`, and later per-page
-Apostate personas (one process per persona; a logical `Browser` may own
-several OS processes).
+**Pages and contexts.** A page is `Target.createTarget{url: "about:blank"}`
+→ `Target.attachToTarget{flatten: true}` → `Page.enable` (ref-counted
+`DomainGuard`, the only domain enabled by default) +
+`Page.setLifecycleEventsEnabled{enabled: true}` → one `tokio::spawn`ed
+event task per page. Pages share the default browser context (cookies
+like tabs) unless `NewPageOptions { proxy }` or `{ isolated: true }` asks
+for `Target.createBrowserContext{proxyServer, disposeOnDetach: true}`;
+the context is disposed by `close_page`. Names map to the index of the
+page created for them; errors list pages as `1, 2, "login"`.
+
+**Navigation.** `goto` subscribes to `Page.lifecycleEvent`, sends
+`Page.navigate`, fails fast on `errorText` (`BrowserError::Navigation`),
+and waits for the event with the response's `loaderId` and the requested
+name (`load` by default, `DOMContentLoaded`, `networkIdle`); a missing
+`loaderId` is a same-document navigation and returns at once.
+`wait_for_navigation` / `reload` / `back` / `forward` wait for the next
+main-frame `Page.frameNavigated` (a `BackForwardCacheRestore` finishes
+immediately) and then the lifecycle event for that frame's `loaderId`.
+`url()` reads `location.href` in the isolated world.
+
+**Worlds.** `page.world()` lazily runs `Page.createIsolatedWorld{frameId,
+worldName: <random 12 chars>, grantUniveralAccess: true}` and installs
+the selector resolver on the world's global object as
+`__surf_<random 12 chars>` — only that world can see it (tested by
+injecting a main-world `<script>` that looks for the name). The page's
+event task bumps a navigation epoch on every main-frame
+`Page.frameNavigated`, so the next `world()` creates a fresh world; a
+navigation the task has not yet seen surfaces as a `Cannot find context` /
+`Execution context was destroyed` protocol error, which `with_world`
+answers by re-creating the world and retrying once. All handles live in
+object group `surf`.
+
+**Dialogs.** `Page.javascriptDialogOpening` is answered by the event task
+per `DialogPolicy` (`Accept` by default — a prompt returns its default
+text; `Dismiss`; `AcceptWith(text)`); every dialog is recorded for
+`page.dialogs()`. Because the task runs concurrently, an action whose
+handler opens `alert()` still returns.
+
+**Auto-wait.** Every action polls every 50 ms up to the timeout: resolve
+(`World::resolve`) → a readiness check with `this` = element (attached →
+visible: non-empty box and not `visibility: hidden` → stable: same box
+over two animation frames, 50 ms fallback for throttled tabs → enabled:
+not `:disabled` / `aria-disabled`) → `DOM.scrollIntoViewIfNeeded{objectId}`
+→ `DOM.getContentQuads{objectId}` → centre of the first quad → an
+`elementFromPoint` hit test (an overlay makes it retry) →
+`Input.dispatchMouseEvent` `mouseMoved` / `mousePressed` / `mouseReleased`.
+Timeouts carry `action`, `selector`, `waited_ms` and the last observed
+state (`not found`, `hidden`, `moving`, `disabled`, `covered by <div#x>`).
+Readers wait for attachment only; `exists` / `count` never wait. `type`
+dispatches `keyDown`(with `text`)/`keyUp` per US-layout character and
+`Input.insertText` for anything else, with optional jittered `delay`;
+`fill` selects all and `insertText`s (empty text → `Delete`); `press`
+parses `Shift+Tab` / `Ctrl+a` / `Mod+Enter` into `key`, `code`,
+`windowsVirtualKeyCode`, modifiers (and `commands: ["SelectAll"]` etc. for
+`Meta` shortcuts on macOS). `text=` selectors match the trimmed
+`textContent` of the deepest element, exact (case-insensitive) before
+substring, skipping `script`/`style`.
+
+**Proxy auth.** Credentials never reach the command line. A page whose
+context has an authenticating proxy (launch-level `proxy:` or
+`NewPageOptions.proxy`) gets `Fetch.enable{handleAuthRequests: true,
+patterns: [{urlPattern: "*"}]}` on its session and a task that answers
+`Fetch.requestPaused` with `continueRequest` and `Fetch.authRequired`
+(`source == "Proxy"`) with `continueWithAuth{ProvideCredentials}`; after
+the first proxy challenge is answered the `Fetch` guard is dropped
+(Chrome caches the credentials for the context) unless a network hook
+still holds the domain.
+
+**Rebind (Decision 10).** `Page::rebind(new_backing, migration)` exports
+cookies (`Storage.getCookies{browserContextId}` on the root session) and
+`localStorage`/`sessionStorage` (isolated-world eval), tears down the old
+backing (event task, `Page` guard, proxy auth), installs the new one,
+imports cookies (`Storage.setCookies`), re-navigates to the URL and
+restores storage (origin-bound, so only together with the URL), then
+detaches and closes the old target. The handle, index and name are
+unchanged. `Browser::rebind_page(page, proxy, migration)` creates the
+target (in a new proxy context when asked) and disposes the old private
+context. One mechanism serves supervisor restarts, `shift_proxy()`, and
+later per-page Apostate personas (one process per persona; a logical
+`Browser` may own several OS processes).
+
+**Measured quiet contract.** `crates/surf-browser/tests/pages.rs::quiet_contract_only_page_enable_is_sent`
+traces every frame of a full session (navigate, type, click, hover,
+select, readers, `all`, screenshot, cookies, viewport, waits, back) and
+asserts the only `*.enable` sent is `Page.enable` — no `Runtime.enable`,
+`DOM.enable`, `DOM.getDocument`, `Network.enable` or `Fetch.enable` — and
+`binding_called_fires_without_runtime_enable` verifies Decision 9's
+channel.
 
 ### Lifetime rule
 
