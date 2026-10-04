@@ -83,7 +83,10 @@ Double quotes only. Escapes: `\n \t \r \\ \" \{ \}` and `\u{1F600}`.
 
 `{expr}` inside a string **interpolates**: the expression is lexed and parsed
 with the full grammar (nested strings and braces allowed) and its value is
-converted with the same rules as `print`. `\{` yields a literal brace.
+converted with the same rules as `print`. `\{` yields a literal brace; a
+`}` that does not close an interpolation is an ordinary character. `{}`
+(empty) is an error. The interpolated expression must end on the same
+line as the string.
 
 ```
 name = "world"
@@ -214,7 +217,9 @@ handler = fn(e):
 
 `fn(params): expr` is a single-expression lambda (the expression ends at the
 end of the line). `fn(params):` followed by an indented block is a block
-lambda. Lambdas capture variables by reference (closures).
+lambda. Lambdas capture variables by reference (closures). A block lambda
+is only possible where the `:` ends a line — not inside `(…)` / `[…]` /
+`{…}`, where newlines are ignored.
 
 ---
 
@@ -375,11 +380,15 @@ Rules:
 - Body lines are `key: value` property lines. Values are full expressions
   evaluated once, at declaration time, in a context where only builtins
   (`env`, string functions, …) are available — not browser actions, not
-  user functions.
+  user functions. A key with nothing after the `:` followed by an indented
+  block of `key: value` lines is a **nested map** (`proxy:` →
+  `{server: …, user: …}`); this is how the `browser:` block itself is
+  shaped.
 - Bare identifiers that are not variables are accepted as **symbols** for
   the keys `cdp` (`pipe`) and `engine` (`chrome`, `apostate`); they are
   equivalent to the same word in quotes.
-- Unknown keys are a `surf check` error.
+- Unknown keys are a `surf check` error (the parser knows the key list and
+  suggests the closest known key). A key given twice is also an error.
 - `browser work:` declares a **named** browser `work`; it is a value:
   `work.page(2).goto(…)`, `work.close()`. The unnamed `browser:` block
   configures the default browser (the one bare actions use). At most one
@@ -487,7 +496,11 @@ on response("*.json"):
 ```
 
 - `on <event>(<args>):` at the top level (or `on message:` inside an actor).
-  Parentheses are optional when there are no arguments.
+  Parentheses are optional when there are no arguments; arguments are
+  positional. Handlers are allowed only at the top level and directly in
+  an actor body (not inside `if`/`for`/`fn` blocks). The event name must be
+  one of `element_appears`, `navigation`, `dialog`, `request`, `response`,
+  `message`; `message` only inside an actor.
 - The handler body runs on **its own task** each time the event fires; the
   payload is bound to `event`. Handlers on the default browser observe the
   sole page (or every page if several exist).
@@ -523,7 +536,11 @@ print(h.join())      # waits; re-raises the task's error
 
 `spawn <callee>(<args>)` runs a `fn`, `task` or `actor` concurrently and
 returns a handle (`join()`, `id`, `cancel()`). A spawned callee that uses
-bare actions gets its own page.
+bare actions gets its own page. `spawn` is an **expression**: it takes the
+whole postfix chain that follows it (`spawn work.fetch(1)` spawns the
+method call), so it can stand alone as a statement, be assigned, or be
+placed in a list (`[spawn a(), spawn b()]`). To call a method on the
+handle in the same expression, parenthesise: `(spawn f()).join()`.
 
 ### 7.2 `parallel for`
 
@@ -557,7 +574,8 @@ task fetch(url):
 
 A `task` is a `fn` with properties. Leading `key: value` lines are
 properties; after the first statement they are a syntax error
-(properties-before-statements rule).
+(properties-before-statements rule). Unknown or duplicate property keys
+are a syntax error.
 
 | property | meaning |
 |----------|---------|
@@ -588,7 +606,9 @@ An actor runs with its own page and a mailbox. Inside an actor body:
 `receive(timeout: d)` returns `nil` on timeout), `on message:` handler
 form. Anywhere: `send(ref, msg)` (ref = spawn handle or id),
 `broadcast(msg)` (every live actor except the sender). Messages are values
-(deep-copied if mutable). An actor ends when its body returns.
+(deep-copied if mutable). An actor ends when its body returns. An actor
+body takes the same leading properties as a task (`retry`, `on_fail`,
+`timeout`, `fresh`), applied to each run of the body.
 
 ### 7.5 Supervisors
 
@@ -603,7 +623,8 @@ supervisor Crew:
 ```
 
 The body may contain only `spawn …` lines and `parallel for … :` whose body
-is `spawn …` lines. A child that errors is restarted (`one_for_one`: just
+is `spawn …` lines (anything else is a syntax error; `supervisor` takes no
+parameter list). A child that errors is restarted (`one_for_one`: just
 it; `one_for_all`: every child) on a fresh page with cookies/storage
 migrated. More than `max_restarts` restarts within `within` → the
 supervisor fails and the error propagates. `supervisor` declarations are
@@ -633,6 +654,7 @@ item        := config | fn_decl | task_decl | actor_decl | supervisor_decl
 
 config      := "browser" IDENT? ":" NEWLINE INDENT prop+ DEDENT
 prop        := IDENT ":" expr NEWLINE
+             | IDENT ":" NEWLINE INDENT prop+ DEDENT        (nested map)
 
 fn_decl     := "fn" IDENT "(" params? ")" ":" block
 task_decl   := "task" IDENT "(" params? ")" ":" NEWLINE INDENT prop* stmt+ DEDENT
@@ -640,13 +662,13 @@ actor_decl  := "actor" IDENT "(" params? ")" ":" NEWLINE INDENT prop* (handler |
 supervisor_decl := "supervisor" IDENT ":" NEWLINE INDENT prop* sup_stmt+ DEDENT
 sup_stmt    := "spawn" postfix NEWLINE
              | "parallel" "for" IDENT "in" expr ":" NEWLINE INDENT prop* sup_stmt+ DEDENT
-handler     := "on" IDENT ("(" args? ")")? ":" block
-params      := param ("," param)*            param := IDENT (":" expr)?
+handler     := "on" IDENT ("(" (expr ("," expr)* ","?)? ")")? ":" block
+params      := (param ("," param)* ","?)?       param := IDENT (":" expr)?
 
 block       := NEWLINE INDENT stmt+ DEDENT
 stmt        := simple NEWLINE | compound
 simple      := assign | "return" expr? | "break" | "continue"
-             | "emit" expr | "exit" ("(" expr ")")? | "spawn" postfix | expr
+             | "emit" expr | "exit" ("(" expr ")")? | expr
 assign      := place "=" expr               place := IDENT | postfix "." IDENT | postfix "[" expr "]"
 compound    := "if" expr ":" block ("elif" expr ":" block)* ("else" ":" block)?
              | "for" IDENT "in" expr ":" block
@@ -654,7 +676,7 @@ compound    := "if" expr ":" block ("elif" expr ":" block)* ("else" ":" block)?
              | "while" expr ":" block
              | "loop" ":" block
              | "try" ":" block "catch" IDENT? ":" block
-             | fn_decl | handler
+             | fn_decl
 
 expr        := or
 or          := and ("or" and)*
@@ -664,7 +686,7 @@ cmp         := range (("==" | "!=" | "<" | "<=" | ">" | ">=") range)?
 range       := add ((".." | "..=") add)?
 add         := mul (("+" | "-") mul)*
 mul         := unary (("*" | "/" | "%") unary)*
-unary       := "-" unary | postfix
+unary       := "-" unary | "spawn" postfix | postfix
 postfix     := primary ( "(" args? ")" | "." IDENT ("(" args? ")")? | "[" expr "]" )*
 args        := arg ("," arg)* ","?           arg := (IDENT ":")? expr
 primary     := INT | FLOAT | STRING | DURATION | "true" | "false" | "nil"
@@ -682,9 +704,20 @@ Notes for the parser:
   bodies; the leading region of task/actor/supervisor/`parallel for`
   bodies). An `IDENT ":"` line after the first statement in such a body is
   the error `property lines must come before statements`. At the top
-  level and in other blocks `x: 1` is a syntax error.
-- `emit`, `exit`, `spawn` are statements, not expressions.
+  level and in other blocks `x: 1` is a syntax error. The shape is
+  unambiguous because no statement can start with `IDENT ":"`.
+- `emit` and `exit` are statements, not expressions. `spawn` is an
+  expression (§ 7.1) and the operand must be a call or method call.
 - A `:` at the end of a line always opens a block, except inside brackets.
+  The lexer enforces this: the next non-blank line must be indented
+  deeper (`expected an indented block after ':'`), and a deeper line not
+  preceded by such a header is `unexpected indentation`. `if x: print(1)`
+  on one line is an error.
+- `task`, `actor`, `supervisor` and `browser:` are top-level only; `fn` may
+  nest in any block.
+- The parser reports every error it finds (recovering at the next line)
+  rather than stopping at the first; lexer errors are reported first and
+  on their own.
 
 ---
 
@@ -695,11 +728,20 @@ Runtime errors carry: `message`, `span` (file:line:col), `selector`,
 
 ```
 error: element not visible after 30s (selector: #submit) [DOM.getContentQuads]
-  --> examples/login.surf:7:1
-   |
- 7 | click("#submit")
-   | ^^^^^^^^^^^^^^^^
+   ╭─[ examples/login.surf:7:1 ]
+   │
+ 7 │ click("#submit")
+   │ ────────┬───────
+   │         ╰───────── selector: #submit
+   │
+   │ Note: CDP method: DOM.getContentQuads
+───╯
 ```
+
+Syntax errors use the same renderer (`surf_syntax::Diagnostic`, drawn by
+ariadne), with a `Help:` line wherever the fix is obvious (`did you mean
+`while`?`, `did you mean `page(1)`?`, `move `retry: …` above the first
+statement`).
 
 Exit codes: `0` ok, `1` runtime error, `2` syntax error, `3` no browser
 found, or whatever `exit(n)` said.

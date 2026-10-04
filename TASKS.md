@@ -51,6 +51,19 @@ something; link the PR / commit that picks it up.
       diagnostics spanning files.
 - [ ] Compound assignment (`+=`), string methods as methods (`s.upper()`).
 - [ ] `surf fmt` — canonical formatter driven by the AST (spans preserved).
+- [ ] surf-syntax: block lambdas inside brackets (`apply(fn(x):` + indented
+      body as an argument). Newlines are suppressed inside `(…)`, so the
+      lexer cannot see the block; needs layout-aware bracket handling.
+- [ ] surf-syntax: `eval(fn(): …)` bodies are parsed as Surf today (the
+      runtime slices `LambdaBody::Expr(e).span` from the source to get the
+      verbatim JS). Decide whether to add a raw-JS lambda form
+      (`js(…)`/backticks) for expressions Surf cannot parse (`=>`, `?.`).
+- [ ] surf-syntax: keyword-adjacent tokens with no space (`1if`, `x.in`)
+      lex as number + keyword / error; fine for now, revisit with `surf fmt`.
+- [ ] surf-syntax: the known-key lists for `browser:` / task / supervisor /
+      `parallel for` props and handler events live in `parser.rs`
+      (`BROWSER_PROPS`, …). When the runtime adds a key, update the list and
+      `docs/language.md` together (consider generating one from the other).
 
 ## Tooling
 - [ ] LSP server (`surf lsp`) + VS Code extension with a TextMate grammar.
