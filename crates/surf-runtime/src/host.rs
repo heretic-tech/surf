@@ -269,10 +269,10 @@ impl Runtime {
 
     /// After `Page::rebind`: the old session (and its observer) is gone, so
     /// install the handlers again on the new one.
-    pub fn after_rebind(&self, browser: &Rc<Browser>, page: &Page) {
+    pub async fn after_rebind(&self, browser: &Rc<Browser>, page: &Page) {
         let key = (self.alias_of(browser), page.index());
         self.observed.borrow_mut().remove(&key);
-        self.instrument(browser);
+        self.instrument(browser).await;
     }
 
     /// Declared `element_appears` handlers.
@@ -306,12 +306,14 @@ impl Runtime {
     }
 
     /// Install observers on every page of `browser` that has none yet.
-    pub fn instrument(&self, browser: &Rc<Browser>) {
+    /// Awaited before the page is handed to the script, so the hooks are
+    /// in place before its first action (see `handlers::spawn_observer`).
+    pub async fn instrument(&self, browser: &Rc<Browser>) {
         let alias = self.alias_of(browser);
         for page in browser.pages() {
             let key = (alias.clone(), page.index());
             if self.observed.borrow_mut().insert(key) {
-                spawn_observer(self.rc(), browser.clone(), page);
+                spawn_observer(self.rc(), browser.clone(), page).await;
             }
         }
     }
@@ -491,8 +493,15 @@ impl Host for Runtime {
                 Some(ev) => match HandlerDecl::new(ev, args, body) {
                     Ok(decl) => {
                         self.handlers.borrow_mut().push(Rc::new(decl));
+                        // Top-level handlers are hoisted, so no browser is
+                        // live yet and the page that gets created later
+                        // awaits its observer. Browsers that already exist
+                        // (REPL, a handler declared from a body) get theirs
+                        // on a task.
+                        let rt = self.rc();
                         for b in self.live_browsers() {
-                            self.instrument(&b);
+                            let rt = rt.clone();
+                            tokio::task::spawn_local(async move { rt.instrument(&b).await });
                         }
                     }
                     Err(e) => self.warn(&format!(

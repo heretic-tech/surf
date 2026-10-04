@@ -214,7 +214,7 @@ impl NativeObject for BrowserObject {
                         .sole_page()
                         .await
                         .map_err(|e| crate::errors::convert(e, action))?;
-                    self.rt.instrument(&browser);
+                    self.rt.instrument(&browser).await;
                     page_method(&self.rt, &browser, &page, action, args).await
                 }
                 other => Err(RuntimeError::new(format!(

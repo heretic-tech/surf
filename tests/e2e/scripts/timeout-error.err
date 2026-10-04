@@ -1,0 +1,7 @@
+[31merror:[0m click("#missing"): timed out after <T> (not found) (selector: #missing)
+   ╭─[ <SCRIPTS>/timeout-error.surf:5:1 ]
+   │
+ 5 │ click("#missing", timeout: 300ms)
+   │ ────────────────┬────────────────  
+   │                 ╰────────────────── selector: #missing
+───╯

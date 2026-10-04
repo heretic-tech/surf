@@ -1,0 +1,6 @@
+synthetic
+POST hello yes by-surf
+other
+one,two,three
+image blocked
+fulfil:GET:/api/items rewrite:GET:/api/items pass:GET:/api/items

@@ -137,7 +137,6 @@ async fn wait_for_navigation_sees_navigation_committed_before_the_call() {
     };
     let fx = Fixture::start().await;
     let page = b.sole_page().await.expect("sole page");
-    page.set_timeout(Duration::from_secs(2));
     page.goto(&fx.url("/forms.html"), WaitUntil::Load)
         .await
         .expect("goto");
@@ -159,6 +158,8 @@ async fn wait_for_navigation_sees_navigation_committed_before_the_call() {
 
     // The armed subscriptions are consumed: a second wait with no action
     // in between times out (nothing navigates).
+    let default_timeout = page.timeout();
+    page.set_timeout(Duration::from_millis(800));
     let err = page
         .wait_for_navigation(WaitUntil::Commit)
         .await
@@ -167,6 +168,7 @@ async fn wait_for_navigation_sees_navigation_committed_before_the_call() {
         matches!(err, BrowserError::Timeout { .. }),
         "expected Timeout, got {err}"
     );
+    page.set_timeout(default_timeout);
 
     // `commit` after an already-committed navigation returns at once.
     page.click("#back-link", opts())

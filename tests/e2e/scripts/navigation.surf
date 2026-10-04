@@ -14,7 +14,10 @@ print(back())
 print(title())
 print(forward())
 print(title())
-print(back(), back())
+# History is [about:blank, forms, nav]: two steps back succeed, a third
+# has nowhere to go.
+print(back(), back(), back())
+print(forward(), title())
 reload()
 print(title(), url().ends_with("/forms.html"))
 

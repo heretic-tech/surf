@@ -150,7 +150,7 @@ impl Runtime {
             }
             None => self.shared_sole_page(&browser, action).await?,
         };
-        self.instrument(&browser);
+        self.instrument(&browser).await;
         Ok((browser, page))
     }
 
@@ -224,7 +224,7 @@ impl Runtime {
             .rebind_page_to(page, target, migration)
             .await
             .map_err(|e| convert(e, action))?;
-        self.after_rebind(browser, page);
+        self.after_rebind(browser, page).await;
         Ok(())
     }
 
@@ -279,7 +279,7 @@ impl Runtime {
             .page(n as usize)
             .await
             .map_err(|e| convert(e, "page"))?;
-        self.instrument(browser);
+        self.instrument(browser).await;
         Ok(page)
     }
 
@@ -293,7 +293,7 @@ impl Runtime {
             .page_named(name)
             .await
             .map_err(|e| convert(e, "page"))?;
-        self.instrument(browser);
+        self.instrument(browser).await;
         Ok(page)
     }
 
@@ -307,7 +307,7 @@ impl Runtime {
             .new_page(opts)
             .await
             .map_err(|e| convert(e, "new_page"))?;
-        self.instrument(browser);
+        self.instrument(browser).await;
         Ok(page)
     }
 

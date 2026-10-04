@@ -1,0 +1,7 @@
+[31merror:[0m several pages are open (1, "login") — say which: page(2).click(…)
+   ╭─[ <SCRIPTS>/ambiguity-error.surf:6:1 ]
+   │
+ 6 │ click("#submit")
+   │ ────────┬───────  
+   │         ╰───────── here
+───╯

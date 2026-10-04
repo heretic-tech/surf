@@ -1,0 +1,5 @@
+image blocked
+ad blocked
+image loaded
+ad loaded
+block: "re:x" — Chrome's URL blocker only takes `*` globs, not re: patterns

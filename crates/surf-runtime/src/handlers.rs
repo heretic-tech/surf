@@ -317,17 +317,25 @@ impl Loading {
     }
 }
 
-/// Start the observer task for `page` (no-op without page-level
-/// handlers). Counts as an installed handler for the lifetime rule until
-/// the page's session ends.
-pub fn spawn_observer(rt: Rc<Runtime>, browser: Rc<Browser>, page: Page) {
+/// Install the handlers on `page` and start its observer task (no-op
+/// without page-level handlers). The set-up — `Network.enable` for
+/// request / response hooks, `Fetch.enable` patterns for `intercept`,
+/// the `MutationObserver` for `element_appears`, the deferred dialog
+/// policy — is awaited *here*, before the action that asked for the page
+/// runs, so the first navigation cannot race ahead of the hooks. Counts
+/// as an installed handler for the lifetime rule until the page's session
+/// ends.
+pub async fn spawn_observer(rt: Rc<Runtime>, browser: Rc<Browser>, page: Page) {
     let all = rt.page_handlers();
     if all.is_empty() {
         return;
     }
+    let Some(observer) = prepare(&rt, &page, all).await else {
+        return;
+    };
     rt.lifetime().handler_installed();
     tokio::task::spawn_local(async move {
-        observe(rt.clone(), browser, page, all).await;
+        observe(rt.clone(), browser, page, observer).await;
         rt.lifetime().handler_removed();
     });
 }
@@ -351,10 +359,35 @@ fn of_kind(all: &[Rc<HandlerDecl>], kind: HandlerEvent) -> Vec<Rc<HandlerDecl>> 
     all.iter().filter(|h| h.event == kind).cloned().collect()
 }
 
-async fn observe(rt: Rc<Runtime>, browser: Rc<Browser>, page: Page, all: Vec<Rc<HandlerDecl>>) {
-    let Ok(session) = page.session() else {
-        return;
-    };
+/// Everything an observer task needs, built by [`prepare`] before the
+/// page is handed to the script.
+struct Observer {
+    frame_id: String,
+    handlers: Vec<Rc<HandlerDecl>>,
+    nav_handlers: Vec<Rc<HandlerDecl>>,
+    request_handlers: Vec<Rc<HandlerDecl>>,
+    response_handlers: Vec<Rc<HandlerDecl>>,
+    intercept_handlers: Vec<Rc<HandlerDecl>>,
+    dialog_handlers: Vec<Rc<HandlerDecl>>,
+    bindings: broadcast::Receiver<Event>,
+    navigations: broadcast::Receiver<Event>,
+    installed: Option<Installed>,
+    req_rx: Option<broadcast::Receiver<Event>>,
+    resp_rx: Option<broadcast::Receiver<Event>>,
+    fin_rx: Option<broadcast::Receiver<Event>>,
+    fail_rx: Option<broadcast::Receiver<Event>>,
+    /// Keeps `Network` enabled for as long as the task runs.
+    hold: Option<Rc<surf_browser::network::NetworkHold>>,
+    loading: Rc<Loading>,
+    interception: Option<Interception>,
+    dialogs: Option<broadcast::Receiver<Event>>,
+}
+
+/// Subscribe and enable what the declared handlers need on `page`.
+/// `None` when the page is gone or the `element_appears` observer cannot
+/// be installed (a warning is printed).
+async fn prepare(rt: &Rc<Runtime>, page: &Page, all: Vec<Rc<HandlerDecl>>) -> Option<Observer> {
+    let session = page.session().ok()?;
     let handlers = of_kind(&all, HandlerEvent::ElementAppears);
     let nav_handlers = of_kind(&all, HandlerEvent::Navigation);
     let request_handlers = of_kind(&all, HandlerEvent::Request);
@@ -362,12 +395,12 @@ async fn observe(rt: Rc<Runtime>, browser: Rc<Browser>, page: Page, all: Vec<Rc<
     let intercept_handlers = of_kind(&all, HandlerEvent::Intercept);
     let dialog_handlers = of_kind(&all, HandlerEvent::Dialog);
     let frame_id = page.frame_id().unwrap_or_default();
-    let mut bindings = session.events("Runtime.bindingCalled");
-    let mut navigations = session.events("Page.frameNavigated");
-    let mut installed = if handlers.is_empty() {
+    let bindings = session.events("Runtime.bindingCalled");
+    let navigations = session.events("Page.frameNavigated");
+    let installed = if handlers.is_empty() {
         None
     } else {
-        match install(&page, &handlers).await {
+        match install(page, &handlers).await {
             Ok(i) => Some(i),
             Err(e) => {
                 if page.is_open() {
@@ -376,12 +409,12 @@ async fn observe(rt: Rc<Runtime>, browser: Rc<Browser>, page: Page, all: Vec<Rc<
                         page.label()
                     ));
                 }
-                return;
+                return None;
             }
         }
     };
-    // Network hooks: `Network` is held by `hold` for as long as this task runs.
-    let (mut req_rx, mut resp_rx, mut fin_rx, mut fail_rx, hold) =
+    // Network hooks: `Network` is held by `hold` for as long as the task runs.
+    let (req_rx, resp_rx, fin_rx, fail_rx, hold) =
         if request_handlers.is_empty() && response_handlers.is_empty() {
             (None, None, None, None, None)
         } else {
@@ -407,8 +440,7 @@ async fn observe(rt: Rc<Runtime>, browser: Rc<Browser>, page: Page, all: Vec<Rc<
                 }
             }
         };
-    let loading = Rc::new(Loading::default());
-    let mut interception = if intercept_handlers.is_empty() {
+    let interception = if intercept_handlers.is_empty() {
         None
     } else {
         let patterns = intercept_handlers.iter().map(|h| h.url_pattern()).collect();
@@ -425,7 +457,7 @@ async fn observe(rt: Rc<Runtime>, browser: Rc<Browser>, page: Page, all: Vec<Rc<
             }
         }
     };
-    let mut dialogs = if dialog_handlers.is_empty() {
+    let dialogs = if dialog_handlers.is_empty() {
         None
     } else {
         page.on_dialog(DialogPolicy::Defer);
@@ -441,6 +473,49 @@ async fn observe(rt: Rc<Runtime>, browser: Rc<Browser>, page: Page, all: Vec<Rc<
         intercept_handlers.len(),
         dialog_handlers.len()
     );
+    Some(Observer {
+        frame_id,
+        handlers,
+        nav_handlers,
+        request_handlers,
+        response_handlers,
+        intercept_handlers,
+        dialog_handlers,
+        bindings,
+        navigations,
+        installed,
+        req_rx,
+        resp_rx,
+        fin_rx,
+        fail_rx,
+        hold,
+        loading: Rc::new(Loading::default()),
+        interception,
+        dialogs,
+    })
+}
+
+async fn observe(rt: Rc<Runtime>, browser: Rc<Browser>, page: Page, observer: Observer) {
+    let Observer {
+        frame_id,
+        handlers,
+        nav_handlers,
+        request_handlers,
+        response_handlers,
+        intercept_handlers,
+        dialog_handlers,
+        mut bindings,
+        mut navigations,
+        mut installed,
+        mut req_rx,
+        mut resp_rx,
+        mut fin_rx,
+        mut fail_rx,
+        hold,
+        loading,
+        mut interception,
+        mut dialogs,
+    } = observer;
     loop {
         tokio::select! {
             ev = event::next(&mut bindings) => {

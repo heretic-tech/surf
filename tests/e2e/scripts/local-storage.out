@@ -1,0 +1,5 @@
+empty
+greeting=hello
+n=2
+greeting,n hello 2
+empty 0
