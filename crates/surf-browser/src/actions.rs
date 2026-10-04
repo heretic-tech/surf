@@ -928,6 +928,19 @@ impl UrlMatcher {
 }
 
 impl Element {
+    /// Wrap a handle the caller already holds (an `objectId` in `world`, on
+    /// `page`) — used by the runtime's `on element_appears` observer, which
+    /// keeps matched elements in an isolated-world array and hands their
+    /// handles to handler bodies. `label` is shown in errors.
+    pub fn from_handle(page: Page, world: World, object_id: String, label: String) -> Element {
+        Element {
+            page,
+            world,
+            object_id,
+            label,
+        }
+    }
+
     /// `selector[index]`.
     pub fn label(&self) -> &str {
         &self.label

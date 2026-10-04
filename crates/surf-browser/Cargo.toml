@@ -28,5 +28,5 @@ libc = { workspace = true }
 windows-sys = { workspace = true }
 
 [dev-dependencies]
-axum = { workspace = true }
+surf-testserver = { workspace = true }
 tracing-subscriber = { workspace = true }

@@ -17,6 +17,7 @@ surf-vm = { path = "crates/surf-vm", version = "0.1.0" }
 surf-cdp = { path = "crates/surf-cdp", version = "0.1.0" }
 surf-browser = { path = "crates/surf-browser", version = "0.1.0" }
 surf-runtime = { path = "crates/surf-runtime", version = "0.1.0" }
+surf-testserver = { path = "crates/surf-testserver", version = "0.1.0" }
 
 # async runtime (surf-cdp / surf-browser / surf-runtime / surf-cli only — never surf-syntax / surf-vm)
 tokio = { version = "1.53.2", features = ["rt", "macros", "io-util", "net", "process", "sync", "time", "fs", "signal"] }

@@ -1,0 +1,18 @@
+[package]
+name = "surf-testserver"
+description = "In-process axum fixture server shared by surf-browser's integration tests and the surf e2e suite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "surf-testserver"
+path = "src/main.rs"
+
+[dependencies]
+axum = { workspace = true }
+tokio = { workspace = true }

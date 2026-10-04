@@ -991,7 +991,6 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 name = "surf-browser"
 version = "0.1.0"
 dependencies = [
- "axum",
  "dirs",
  "futures",
  "indexmap",
@@ -1000,6 +999,7 @@ dependencies = [
  "serde",
  "serde_json",
  "surf-cdp",
+ "surf-testserver",
  "tempfile",
  "thiserror",
  "tokio",
@@ -1068,6 +1068,14 @@ dependencies = [
  "ariadne",
  "insta",
  "serde",
+]
+
+[[package]]
+name = "surf-testserver"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
 ]
 
 [[package]]
