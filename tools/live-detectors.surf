@@ -1,0 +1,52 @@
+#!/usr/bin/env surf
+# Live detector run (manual, headed): open the public bot detectors in a
+# stock Chrome launched by Surf, give each page time to finish its tests,
+# screenshot into tools/out/ (gitignored) and dump the visible text next to
+# it so the results can be read without the images. Results are recorded in
+# docs/quiet-cdp.md with the date and Chrome version.
+#
+#     surf run tools/live-detectors.surf          # from the repo root
+#
+# rebrowser's page interacts with the mouse / keyboard to run some of its
+# tests, so we move and click around a little; sannysoft and browserscan
+# run on load.
+browser:
+    headless: false
+    size: "1280x1000"
+
+out = "tools/out"
+
+fn capture(name, url, settle):
+    goto(url, timeout: 60s)
+    sleep(settle)
+    screenshot("{out}/{name}.png", full: true)
+    fs.write("{out}/{name}.txt", text("body"))
+    print("{name}: {url} -> {out}/{name}.png")
+
+# 1. rebrowser-bot-detector: a table of tests; green = passed, white = the
+# test was never triggered. Three of its tests are traps for tools that
+# evaluate in the main world: `dummyFn` (a main-world function), the
+# `sourceUrlLeak` getter and `mainWorldExecution`. We call exactly what the
+# page asks for — from Surf's isolated world — and record what we saw: the
+# main-world function is simply not there, the overridden getters are not
+# ours, and the table stays white for all three.
+goto("https://bot-detector.rebrowser.net/", timeout: 60s)
+sleep(2s)
+print("rebrowser isolated-world probes:")
+print("  typeof window.dummyFn =", eval("typeof window.dummyFn"))
+print("  getElementsByClassName('div').length =", eval("document.getElementsByClassName('div').length"))
+print("  getElementById('detections-json') =", eval("String(document.getElementById('detections-json'))"))
+hover("body")
+scroll(0, 200)
+sleep(2s)
+scroll(0, -200)
+sleep(3s)
+screenshot("{out}/rebrowser.png", full: true)
+fs.write("{out}/rebrowser.txt", text("body"))
+print("rebrowser: {url()} -> {out}/rebrowser.png")
+
+# 2. sannysoft: WebDriver / Chrome / Permissions / Plugins / Languages / WebGL rows.
+capture("sannysoft", "https://bot.sannysoft.com/", 5s)
+
+# 3. browserscan: verdict near the top ("Normal" vs "Robot").
+capture("browserscan", "https://www.browserscan.net/bot-detection", 10s)

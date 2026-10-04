@@ -21,7 +21,7 @@
 //! | `/img/pixel.png` | a 1×1 PNG (for `block` / `intercept`) |
 //! | `/ads/banner.js` | a script that sets `window.adLoaded` |
 //! | `/download/report.txt` | `Content-Disposition: attachment` |
-//! | `/detector` | `tools/detector/index.html` from the workspace (404 until it exists) |
+//! | `/detector` | `tools/detector/index.html` from the workspace (`?mode=headed\|headless`) |
 //!
 //! [`proxy::Proxy`] is a forward-proxy stub (optionally requiring Basic
 //! authentication) that tags what it forwards with `X-Surf-Proxy` on the
@@ -257,7 +257,8 @@ async fn download() -> Response {
         .into_response()
 }
 
-/// `tools/detector/index.html` from the workspace root (task 10 writes it).
+/// `tools/detector/index.html` from the workspace root (the local
+/// detection gate; see `docs/quiet-cdp.md`).
 async fn detector() -> Response {
     let path = workspace_root().join("tools/detector/index.html");
     match std::fs::read_to_string(&path) {

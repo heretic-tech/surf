@@ -1,0 +1,221 @@
+<!doctype html>
+<!--
+  Surf local detector — a replica of the checks public bot detectors run,
+  served by surf-testserver at /detector and by `surf doctor -\-detector`
+  from a temp file. Every check renders PASS / FAIL / INFO into
+  <li data-check=name data-status=… data-detail=…>; `#done` appears when
+  the first round has finished and carries data-round (1, then 2 after the
+  "re-check" button is clicked, so an automation tool can interact with
+  the page first and have the globals / prototype checks run again).
+
+  ?mode=headed|headless tells the page which checks are informational:
+  a headless UA and a zero window chrome are expected headless, not bugs.
+
+  The page is written as a module so it creates no globals of its own
+  (check (e) would otherwise flag the detector itself).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Surf detector</title>
+<script>
+  // Baseline of the global namespace, captured before anything else runs
+  // in this document (check (e) diffs against it). Stored on a frozen
+  // symbol-keyed slot so it does not show up in Object.keys(window) or
+  // getOwnPropertyNames(window) string keys.
+  (function () {
+    const key = Symbol.for('detector.baseline');
+    window[key] = Object.freeze({
+      keys: Object.keys(window),
+      names: Object.getOwnPropertyNames(window),
+    });
+  })();
+</script>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 2rem; max-width: 60rem; }
+  li { margin: .25rem 0; }
+  li::before { content: attr(data-status); display: inline-block; width: 4rem; font-weight: 600; }
+  li[data-status="PASS"]::before { color: #0a7d2c; }
+  li[data-status="FAIL"]::before { color: #c0262d; }
+  li[data-status="INFO"]::before { color: #666; }
+  li[data-status="…"]::before { color: #999; }
+  small { color: #666; }
+  #summary { font-weight: 600; margin-top: 1rem; }
+</style>
+</head>
+<body>
+<h1>Surf detector</h1>
+<p>Local replica of the known CDP / automation checks. <small>Mode: <span id="mode"></span></small></p>
+<ul id="checks">
+  <li data-check="runtime-enable-getter" data-status="…">Runtime.enable leak (classic) — object getter / <code>Error.stack</code> accessor read when <code>console.debug</code> / <code>console.log</code> arguments are serialised</li>
+  <li data-check="runtime-enable-stack" data-status="…">Runtime.enable leak (current Chrome) — a user <code>Error.prepareStackTrace</code> invoked while the inspector formats a console-logged Error's stack</li>
+  <li data-check="webdriver" data-status="…"><code>navigator.webdriver === false</code></li>
+  <li data-check="headless-ua" data-status="…">User agent does not say <code>HeadlessChrome</code> (headed)</li>
+  <li data-check="window-chrome" data-status="…"><code>window.chrome</code> is present</li>
+  <li data-check="globals" data-status="…">No unexpected globals (diff against load-time baseline; names containing <code>surf</code>, <code>__</code>, <code>cdc_</code>, <code>puppeteer</code>, <code>playwright</code>)</li>
+  <li data-check="window-chrome-height" data-status="…"><code>outerHeight − innerHeight</code> between 0 and 120 px (headed: no automation infobar)</li>
+  <li data-check="native-prototypes" data-status="…"><code>document.querySelector</code>, <code>MutationObserver</code>, <code>Function.prototype.toString</code> are native</li>
+  <li data-check="getter-timing" data-status="…">10 000 getter reads (<code>performance.now()</code>, informational)</li>
+</ul>
+<p>
+  <input id="probe" placeholder="type here" aria-label="probe input">
+  <button id="recheck" type="button">Re-check</button>
+</p>
+<p id="summary"></p>
+<script type="module">
+  const params = new URLSearchParams(location.search);
+  const uaHeadless = /HeadlessChrome/.test(navigator.userAgent);
+  const mode = params.get('mode') || (uaHeadless ? 'headless' : 'headed');
+  const headed = mode === 'headed';
+  document.getElementById('mode').textContent = mode;
+  const baseline = window[Symbol.for('detector.baseline')];
+  const SUSPICIOUS = /surf|__|cdc_|puppeteer|playwright/i;
+
+  const results = new Map();
+  function set(name, status, detail) {
+    results.set(name, { status, detail: detail == null ? '' : String(detail) });
+  }
+
+  // (a) Runtime.enable leak. With Runtime.enable on, Chrome builds a
+  // preview / description of every console argument on the inspector
+  // side; a getter that records being read is the tell. Two variants:
+  // a plain object with an accessor property, and an Error whose `stack`
+  // is an accessor (what rebrowser's "runtimeEnableLeak" does). Measured
+  // on Chrome 154: V8 no longer reads the `stack` property for the
+  // preview, but it still formats the error's stack for the description,
+  // which invokes a user `Error.prepareStackTrace` — and that only happens
+  // when a session has Runtime enabled (verified with --dump-dom, no CDP:
+  // never invoked). NB: a `Symbol.toStringTag` getter or an Error's own
+  // `toString` fire on *every* console call, inspected or not (Blink builds
+  // the message text eagerly) — they are not a CDP signal and are not used.
+  let getterLeak = false;
+  let stackLeak = false;
+  function fireConsoleProbes() {
+    const o = { get id() { getterLeak = true; return 1; } };
+    console.debug(o);
+    console.log(o);
+    const err = new Error('detector');
+    Object.defineProperty(err, 'stack', {
+      configurable: false,
+      enumerable: false,
+      get() { getterLeak = true; return ''; },
+    });
+    console.debug(err);
+    console.log(err);
+
+    const previous = Error.prepareStackTrace;
+    Error.prepareStackTrace = () => { stackLeak = true; return ''; };
+    console.debug(new Error('prepare'));
+    console.log(new Error('prepare'));
+    Error.prepareStackTrace = previous;
+  }
+
+  function checkStatic() {
+    set('runtime-enable-getter', getterLeak ? 'FAIL' : 'PASS', getterLeak ? 'getter was read' : 'getters never read');
+    set('runtime-enable-stack', stackLeak ? 'FAIL' : 'PASS', stackLeak ? 'Error.prepareStackTrace was invoked' : 'Error.prepareStackTrace never invoked');
+
+    // (b)
+    const wd = navigator.webdriver;
+    set('webdriver', wd === false ? 'PASS' : 'FAIL', `navigator.webdriver = ${String(wd)}`);
+
+    // (c)
+    if (headed) {
+      set('headless-ua', uaHeadless ? 'FAIL' : 'PASS', navigator.userAgent);
+    } else {
+      set('headless-ua', 'INFO', `headless run; UA ${uaHeadless ? 'contains' : 'does not contain'} HeadlessChrome: ${navigator.userAgent}`);
+    }
+
+    // (d)
+    const hasChrome = typeof window.chrome === 'object' && window.chrome !== null;
+    const chromeKeys = hasChrome ? Object.keys(window.chrome).join(',') : '';
+    set('window-chrome', hasChrome ? 'PASS' : 'FAIL', hasChrome ? `keys: ${chromeKeys || '(none)'}` : 'window.chrome is missing');
+
+    // (f)
+    const diff = window.outerHeight - window.innerHeight;
+    if (headed) {
+      set('window-chrome-height', diff >= 0 && diff <= 120 ? 'PASS' : 'FAIL', `${diff}px (outer ${window.outerHeight}, inner ${window.innerHeight})`);
+    } else {
+      set('window-chrome-height', 'INFO', `headless run; ${diff}px (outer ${window.outerHeight}, inner ${window.innerHeight})`);
+    }
+
+    // (h)
+    const probe = { get v() { return 1; } };
+    let acc = 0;
+    const t0 = performance.now();
+    for (let i = 0; i < 10000; i++) acc += probe.v + navigator.userAgent.length;
+    const t1 = performance.now();
+    set('getter-timing', 'INFO', `${(t1 - t0).toFixed(3)} ms for 10000 reads (acc ${acc})`);
+  }
+
+  // (e) and (g) are re-run on demand so a tool can interact first.
+  function checkDynamic() {
+    const keysNow = Object.keys(window);
+    const namesNow = Object.getOwnPropertyNames(window);
+    const addedKeys = keysNow.filter((k) => !baseline.keys.includes(k));
+    const addedNames = namesNow.filter((k) => !baseline.names.includes(k));
+    const suspicious = namesNow.filter((k) => SUSPICIOUS.test(k));
+    const added = [...new Set([...addedKeys, ...addedNames])];
+    const bad = [...new Set([...added, ...suspicious])];
+    set('globals', bad.length === 0 ? 'PASS' : 'FAIL',
+      bad.length === 0 ? `${namesNow.length} own names, none added, none suspicious` : `unexpected: ${bad.join(', ')}`);
+
+    const native = (f) => /^function \w*\(\) \{\s*\[native code\]\s*\}$/.test(Function.prototype.toString.call(f));
+    const probes = {
+      'document.querySelector': document.querySelector,
+      'document.querySelectorAll': document.querySelectorAll,
+      'MutationObserver': MutationObserver,
+      'MutationObserver.prototype.observe': MutationObserver.prototype.observe,
+      'Function.prototype.toString': Function.prototype.toString,
+      'Object.getOwnPropertyDescriptor': Object.getOwnPropertyDescriptor,
+    };
+    const patched = Object.entries(probes).filter(([, f]) => !native(f)).map(([n]) => n);
+    const toStringItself = Function.prototype.toString.call(Function.prototype.toString);
+    set('native-prototypes', patched.length === 0 ? 'PASS' : 'FAIL',
+      patched.length === 0 ? `all native (${toStringItself})` : `patched: ${patched.join(', ')}`);
+  }
+
+  function render(round) {
+    let pass = 0, fail = 0, info = 0;
+    for (const li of document.querySelectorAll('li[data-check]')) {
+      const r = results.get(li.dataset.check);
+      if (!r) continue;
+      li.dataset.status = r.status;
+      li.dataset.detail = r.detail;
+      let small = li.querySelector('small');
+      if (!small) { small = document.createElement('small'); li.append(' ', small); }
+      small.textContent = r.detail ? `— ${r.detail}` : '';
+      if (r.status === 'PASS') pass++; else if (r.status === 'FAIL') fail++; else info++;
+    }
+    const total = pass + fail + info;
+    document.getElementById('summary').textContent = `${total} checks: ${pass} PASS, ${fail} FAIL, ${info} INFO`;
+    let done = document.getElementById('done');
+    if (!done) {
+      done = document.createElement('span');
+      done.id = 'done';
+      document.getElementById('summary').after(done);
+    }
+    done.textContent = `(round ${round} complete)`;
+    done.dataset.round = String(round);
+    done.dataset.fail = String(fail);
+  }
+
+  let round = 0;
+  fireConsoleProbes();
+  // Give the inspector side 100 ms to touch the console arguments.
+  setTimeout(() => {
+    checkStatic();
+    checkDynamic();
+    render(++round);
+  }, 100);
+
+  document.getElementById('recheck').addEventListener('click', () => {
+    fireConsoleProbes();
+    setTimeout(() => {
+      checkStatic();
+      checkDynamic();
+      render(++round);
+    }, 100);
+  });
+</script>
+</body>
+</html>

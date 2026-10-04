@@ -11,3 +11,4 @@
 .empryo/desktop/
 .empryo/desktop-owned-sessions.json
 .empryo/background/
+/tools/out/
