@@ -1,0 +1,11 @@
+Surf detector
+{"check":"runtime-enable-getter","status":"PASS"}
+{"check":"runtime-enable-stack","status":"PASS"}
+{"check":"webdriver","status":"PASS"}
+{"check":"headless-ua","status":"INFO"}
+{"check":"window-chrome","status":"PASS"}
+{"check":"globals","status":"PASS"}
+{"check":"window-chrome-height","status":"INFO"}
+{"check":"native-prototypes","status":"PASS"}
+{"check":"getter-timing","status":"INFO"}
+9 checks: 6 PASS, 0 FAIL, 3 INFO

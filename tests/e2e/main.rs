@@ -4,8 +4,10 @@
 //! `cargo test --test e2e` is the one command (the target is declared in
 //! `crates/surf-cli/Cargo.toml` with its path pointing here, so
 //! `CARGO_BIN_EXE_surf` resolves). Every `tests/e2e/scripts/<name>.surf`
-//! is run with `surf run --headless` (`SURF_E2E_HEADED=1` forces headed);
-//! its stdout must equal `<name>.out` after normalisation and the exit
+//! is run with `surf run --headless` (`SURF_E2E_HEADED=1` forces headed;
+//! a script named `<name>-headed.surf` always runs `--headed` and is
+//! skipped when no display exists); its stdout must equal `<name>.out`
+//! after normalisation and the exit
 //! code must be `0` (or the number in `<name>.code`). When `<name>.err`
 //! exists, stderr must match it too (error-message snapshots). A mismatch
 //! prints a unified diff. `SURF_E2E_FILTER=<substring>` runs a subset;
@@ -90,11 +92,22 @@ fn headed() -> bool {
     std::env::var("SURF_E2E_HEADED").is_ok_and(|v| !v.is_empty() && v != "0")
 }
 
+/// `<name>-headed.surf` scripts run headed (the headed detector run).
+fn wants_headed(script: &Path) -> bool {
+    script
+        .file_stem()
+        .is_some_and(|s| s.to_string_lossy().ends_with("-headed"))
+}
+
 fn run_surf(chrome: &Path, server: &Server, tmp: &Path, script: &Path, extra: &[&str]) -> Outcome {
     let out = Command::new(env!("CARGO_BIN_EXE_surf"))
         .arg("run")
         .arg(script)
-        .arg(if headed() { "--headed" } else { "--headless" })
+        .arg(if headed() || wants_headed(script) {
+            "--headed"
+        } else {
+            "--headless"
+        })
         .arg("--timeout")
         .arg("15s")
         .args(extra)
@@ -189,6 +202,10 @@ fn scripts_match_expected_output() {
     let mut failures = Vec::new();
     for script in &scripts {
         let name = script.file_stem().unwrap().to_string_lossy().into_owned();
+        if wants_headed(script) && !surf_browser::display::has_display() {
+            eprintln!("e2e {name}: skipped (needs a display)");
+            continue;
+        }
         // Each script gets a clean scratch directory (downloads, exports).
         let scratch = tmp.path().join(&name);
         std::fs::create_dir_all(&scratch).unwrap();
@@ -288,6 +305,127 @@ fn fifty_concurrent_pages_under_thirty_seconds() {
         elapsed < std::time::Duration::from_secs(30),
         "took {elapsed:?}"
     );
+}
+
+/// Port-exposure gate (quiet rule 4): while a script holds a browser open
+/// over the default pipe transport, neither the Chrome process nor `surf`
+/// itself owns a listening TCP socket (`lsof -iTCP -sTCP:LISTEN -a -p`).
+#[test]
+fn pipe_transport_opens_no_listening_port() {
+    let Some(chrome) = chrome_or_skip("pipe_transport_opens_no_listening_port") else {
+        return;
+    };
+    if !cfg!(any(target_os = "macos", target_os = "linux")) {
+        eprintln!("skipping pipe_transport_opens_no_listening_port: lsof gate is unix-only");
+        return;
+    }
+    let server = Server::start();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let script = tmp.path().join("hold.surf");
+    // Launch, load a page, then keep the browser up for a while.
+    std::fs::write(
+        &script,
+        "base = env(\"SURF_E2E_BASE\")\ngoto(\"{base}/\")\nprint(text(\"h1\"))\nsleep(4s)\n",
+    )
+    .unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_surf"))
+        .arg("run")
+        .arg(&script)
+        .arg("--headless")
+        .env("SURF_CHROME", &chrome)
+        .env("SURF_E2E_BASE", &server.fixture.base)
+        .env("NO_COLOR", "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn surf");
+    let surf_pid = child.id();
+    // The browser is a direct child of `surf`; wait for it to appear and
+    // give it a moment to finish starting (a DevTools listener, if any,
+    // is bound during startup).
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let mut chrome_pids = Vec::new();
+    while std::time::Instant::now() < deadline {
+        chrome_pids = child_pids(surf_pid);
+        if !chrome_pids.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(
+        !chrome_pids.is_empty(),
+        "surf never started a browser process"
+    );
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    let mut offenders = Vec::new();
+    for pid in chrome_pids.iter().chain(std::iter::once(&surf_pid)) {
+        match listening_sockets(*pid) {
+            Some(lines) if !lines.is_empty() => {
+                offenders.push(format!("pid {pid}:\n{}", lines.join("\n")))
+            }
+            Some(_) => {}
+            None => {
+                eprintln!("lsof not available; skipping pipe_transport_opens_no_listening_port");
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            }
+        }
+    }
+    eprintln!(
+        "port gate: surf pid {surf_pid}, browser pid(s) {chrome_pids:?}: no listening sockets"
+    );
+    let out = child.wait_with_output().expect("surf exit");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        offenders.is_empty(),
+        "listening TCP sockets while a browser is up over the pipe:\n{}",
+        offenders.join("\n")
+    );
+}
+
+/// Direct children of `pid` whose command line carries the pipe flag —
+/// the browser process (not the transient `chrome --version` probe).
+fn child_pids(pid: u32) -> Vec<u32> {
+    let Ok(out) = Command::new("pgrep")
+        .args(["-P", &pid.to_string(), "-f", "remote-debugging-pipe"])
+        .output()
+    else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.trim().parse().ok())
+        .collect()
+}
+
+/// `lsof -iTCP -sTCP:LISTEN -a -p <pid>`: the listening sockets owned by
+/// `pid` (without the header line). `None` if lsof is unavailable.
+fn listening_sockets(pid: u32) -> Option<Vec<String>> {
+    let out = Command::new("lsof")
+        .args([
+            "-iTCP",
+            "-sTCP:LISTEN",
+            "-a",
+            "-p",
+            &pid.to_string(),
+            "-n",
+            "-P",
+        ])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    Some(
+        text.lines()
+            .filter(|l| !l.starts_with("COMMAND") && !l.trim().is_empty())
+            .map(str::to_owned)
+            .collect(),
+    )
 }
 
 #[test]

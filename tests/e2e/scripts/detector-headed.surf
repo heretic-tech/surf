@@ -1,0 +1,15 @@
+# Local detector (tools/detector/index.html, served at /detector): every
+# non-informational check must PASS through the whole stack — headed run.
+# The page re-runs the globals / prototype checks after we have typed and
+# clicked, so a main-world injection by any action would show up.
+base = env("SURF_E2E_BASE")
+goto("{base}/detector?mode=headed")
+wait("#done")
+print(text("h1"))
+type("#probe", "surf was here")
+hover("#recheck")
+click("#recheck")
+wait("#done[data-round='2']")
+for li in all("li[data-check]"):
+    emit {check: li.attr("data-check"), status: li.attr("data-status")}
+print(text("#summary"))
