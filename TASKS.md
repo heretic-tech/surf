@@ -33,10 +33,17 @@ something; link the PR / commit that picks it up.
 - [ ] surf-cdp: `Session::events` channels are created lazily and dropped
       only when their last receiver is gone *and* an event arrives; add an
       explicit `unsubscribe`/sweep if idle sessions pile up (parallel pools).
-- [ ] surf-browser launcher (step 3): when `dup2`-ing `ChildFds` onto 3/4 in
-      `pre_exec`, handle the (unlikely) case where a child fd already *is* 3
-      or 4 (clear `CLOEXEC` with `fcntl` instead of `dup2`, and dup the
-      write end first if it equals 3).
+- [ ] surf-browser launcher: port mode (`cdp: N`) connects through
+      `surf_cdp::transport::tcp::connect`, which has no timeouts of its own;
+      the launcher wraps each attempt in 3 s. Fold a timeout into `tcp` if
+      attach mode (`cdp: "ws://…"`, step 7) needs one too.
+- [ ] surf-browser launcher: Windows path (`--remote-debugging-io-pipes`,
+      no `SIGTERM` → straight to `TerminateProcess`) is written but has
+      never run; needs the Windows CI job above.
+- [ ] surf-browser launcher: Linux `display.rs` (Xvfb) compiles only on
+      Linux and was not exercised on this Mac; CI's `xvfb-run` job sets
+      `DISPLAY`, so `virtual: true` is a no-op there. Add a Linux job that
+      unsets `DISPLAY` and runs a `virtual: true` launch.
 - [ ] Main-world eval (opt-in, explicit): `addBinding` technique — install a
       binding in an isolated world, use a page-side trampoline so main-world
       code never sees `Runtime.enable`. Needs a design note on the observable
@@ -68,7 +75,19 @@ something; link the PR / commit that picks it up.
 ## Tooling
 - [ ] LSP server (`surf lsp`) + VS Code extension with a TextMate grammar.
 - [ ] `surf doctor` full report: Chrome version, flags used, pipe round-trip
-      latency, `navigator.webdriver` check, isolated-world sanity.
+      latency, `navigator.webdriver` check, isolated-world sanity. Switch it
+      from the path-only `surf_browser::find_chrome()` wrapper to
+      `surf_browser::discovery::find_chrome(None)` (version, origin,
+      `search_locations()`), then delete the wrapper.
+- [ ] `surf install`: download Chrome for Testing into
+      `~/.cache/surf/chrome/<version>/` (discovery already walks that tree,
+      newest version first).
+- [ ] Detection gate (step 10): assert `navigator.webdriver === false` on a
+      launched browser and keep
+      `tests/launch.rs::webdriver_is_true_without_automationcontrolled_switch`
+      as the control (Decision 12). If a future Chrome stops setting the
+      flag for a debugger pipe, that control test fails and the switch can
+      be reconsidered.
 - [ ] `surf repl`.
 - [ ] Detection + perf gates in CI (cold start < 5 ms VM, launch-to-first-
       action budget, zero forbidden methods in a CDP trace).

@@ -11,7 +11,7 @@ crates/
   surf-syntax    lexer (INDENT/DEDENT) → parser (recursive descent + Pratt) → AST, ariadne diagnostics   [wasm32-clean]
   surf-vm        AST → bytecode; single-threaded async stack VM; Value; Host trait; stdlib             [wasm32-clean]
   surf-cdp       Transport (pipe | websocket), \0 framing, Connection (id/session mux), Session, Event, typed Command codegen   [Send + Sync]
-  surf-browser   Chrome discovery, quiet launch (exact flag list), Xvfb, Browser, Page (rebindable backing), isolated World, selectors, auto-wait actions, input, network hooks, cookies, MutationObserver
+  surf-browser   Chrome discovery, quiet launch (exact flag list, crash watcher, shutdown ladder), Xvfb (display.rs), Browser, Page (rebindable backing), isolated World, selectors, auto-wait actions, input, network hooks, cookies, MutationObserver
   surf-runtime   implements surf_vm::Host: implicit browser/page, bare actions, NativeObject wrappers, handlers, spawn/parallel for, tasks, actors, supervisors, lifetime rule
   surf-cli       `surf run | check | doctor | repl` — tokio current_thread + LocalSet, exit codes, diagnostics rendering
 protocol/        vendored browser_protocol.json + js_protocol.json (+ VERSION) for codegen
@@ -75,9 +75,9 @@ surf-syntax ──► surf-vm ──► surf-runtime ──► surf-browser ─�
 | rule | enforced in |
 |------|-------------|
 | never `Runtime.enable`, never `DOM.enable` | `surf_cdp::FORBIDDEN_METHODS` (refused by `Session::call_raw` in every build; no typed command is generated for them), `Session::enable_domain` rejects `Runtime`/`DOM`; `surf-browser` only creates isolated worlds |
-| exact launch flags, no `--enable-automation`, no `--disable-*` | `surf_browser::launch::LaunchOptions::args` (unit-tested) |
+| exact launch flags, no `--enable-automation`; the only `--disable-*` is `--disable-blink-features=AutomationControlled`, on launched browsers only (Decision 12) | `surf_browser::launch::LaunchConfig::args` (unit-tested; `tests/launch.rs` checks `navigator.webdriver === false`, no infobar, and that the switch is why) |
 | only `Page.enable` by default; `Network`/`Fetch` only while a hook exists | `surf_cdp::DomainGuard` ref-counting, owned by `surf_browser::network` hooks |
-| pipe by default, no listening port unless `cdp: 9222` | `surf_browser::launch::CdpMode` |
+| pipe by default, no listening port unless `cdp: 9222` | `surf_browser::launch::CdpMode` → `TransportChoice` (`tests/launch.rs` runs `lsof -iTCP -sTCP:LISTEN -p <pid>`) |
 | no main-world injection; helpers in the isolated world under random names | `surf_browser::world`, `surf_browser::observer` |
 
 ## Public contracts
@@ -131,6 +131,9 @@ pub trait Command: Serialize { const METHOD: &'static str; type Response: Deseri
 session an `Arc`); call them through the `Arc` returned by `new`. Additive
 helpers beyond the contract: `Connection::session(id)` (wrap a `sessionId`
 learned from `Target.attachedToTarget`), `close()`, `wait_closed()`,
+`mark_crashed(exit_code, stderr_tail)` (the launcher's process watcher
+calls it; in-flight and later calls then fail with
+`CdpError::BrowserCrashed` instead of `Closed`),
 `Session::with_timeout(Option<Duration>)`, `Session::domain_refcount`,
 `Event::parse::<E: ProtocolEvent>()`, `surf_cdp::event::next(&mut rx)`
 (drains a receiver, logging lag).
@@ -303,6 +306,50 @@ Property semantics: config props are evaluated eagerly at declaration time
 (`env(...)` allowed). Task/actor/supervisor props are `Prop::Const` for
 literals and `Prop::Lazy` thunks for anything that must be evaluated at use
 time (`on_fail: shift_proxy()` runs once per failure, never at declaration).
+
+### surf-browser: discovery and launch
+
+```rust
+pub fn discovery::find_chrome(explicit: Option<&Path>) -> Result<Found { path, version: Option<String>, origin }, BrowserError>;
+pub fn discovery::chrome_or_skip(test_name: &str) -> Option<PathBuf>;   // tests: prints a skip message
+
+pub struct LaunchOptions { path, cdp: CdpMode, headless: Option<bool>, virtual_display, size, profile, proxy, proxies, flags, timeout, engine }  // the `browser:` block
+impl LaunchOptions { pub fn resolve(&self) -> Result<LaunchConfig, BrowserError>; }        // discovery + headed/headless decision + proxy parse
+
+pub struct LaunchConfig { path, headless: bool, size, proxy: Option<ProxySpec>, profile, flags, env, virtual_display, transport: TransportChoice { Pipe | Port(u16) }, correct_automation_controlled }
+impl LaunchConfig { pub fn args(&self, user_data_dir: &Path) -> Vec<String>; }           // THE flag list
+
+pub struct ProxySpec { scheme, host, port, credentials: Option<Credentials> }             // ProxySpec::parse("http://u:p@host:8080" | "socks5://host:1080" | "host:8080")
+
+pub async fn launch(cfg: LaunchConfig) -> Result<Launched, BrowserError>;
+pub struct Launched { connection: Arc<Connection>, process: Process, profile_dir: ProfileDir, display: Option<VirtualDisplay>, proxy_credentials: Option<Credentials>, product, path, args }
+impl Launched { pub fn root(&self) -> Session; pub fn stderr_tail(&self) -> String; pub async fn close(&self); }
+```
+
+Discovery order: `browser.path` → `SURF_CHROME` (both hard errors when set
+but missing) → `~/.cache/surf/chrome/**` (`surf install`) → platform
+locations (macOS app bundles, `/opt/google/chrome/chrome`, `PATH` names,
+Windows Program Files / LocalAppData) → Playwright / Puppeteer / Apostate
+caches via a bounded walk for an executable named like a Chromium binary
+(newest version first). Version via `--version` with a 3 s timeout. The
+`NotFound` error lists every location tried.
+
+Launch: a `surf-profile-*` temp dir (removed on close) or the user's
+`profile:`; Xvfb on Linux when `virtual: true` and no `DISPLAY`
+(`display.rs`); pipe pair from `surf_cdp::transport::pipe::create_pair`
+installed on fd 3 / fd 4 in `pre_exec` (`launch::sys`, the crate's only
+`unsafe`; fds already at 3/4 are moved first); stderr drained into a
+64-line ring buffer; first `Browser.getVersion` within 10 s or the error
+carries the stderr tail. Port mode (`cdp: N`, `0` = Chrome picks, read from
+`DevToolsActivePort`) connects through `/json/version`. A watcher task owns
+the `Child`; an unexpected exit calls `Connection::mark_crashed` so calls
+fail with `BrowserCrashed { exit_code, stderr_tail }` (the transport
+wrapper delays EOF up to 1 s so in-flight calls see the crash, not
+`Closed`). `Launched::close()` (idempotent; the Ctrl-C handler calls it):
+`Browser.close` → 2 s → `SIGTERM` → 2 s → `SIGKILL`, then remove the temp
+profile (retrying while helper processes drain) and stop Xvfb. Dropping a
+`Launched` without `close()` kills the process and removes the temp
+profile best-effort.
 
 ### surf-browser: Page / backing indirection (Decision 10)
 

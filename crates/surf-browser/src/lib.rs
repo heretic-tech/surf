@@ -5,12 +5,14 @@
 //! above this crate talks CDP directly.
 //!
 //! Responsibilities:
-//! - [`discovery`]: find a Chrome/Chromium binary (`SURF_CHROME` env,
-//!   `browser.path`, then platform defaults).
-//! - [`launch`]: build the argument list (see [`launch::LaunchOptions::args`]
+//! - [`discovery`]: find a Chrome/Chromium binary (`browser.path`,
+//!   `SURF_CHROME`, `~/.cache/surf/chrome`, platform defaults, then the
+//!   Playwright / Puppeteer / Apostate caches) and its version.
+//! - [`launch`]: build the argument list (see [`launch::LaunchConfig::args`]
 //!   for the exact, exhaustive set of flags Surf passes), create the pipe
-//!   pair, spawn the process, wire fd 3 / fd 4, capture a stderr tail.
-//! - [`xvfb`]: Linux `virtual: true` — manage an Xvfb server automatically.
+//!   pair, spawn the process, wire fd 3 / fd 4, capture a stderr tail,
+//!   detect crashes, and run the shutdown ladder ([`launch::Launched::close`]).
+//! - [`display`]: Linux `virtual: true` — manage an Xvfb server automatically.
 //! - [`browser`]: the [`Browser`] handle: browser contexts, target
 //!   lifecycle, proxy rotation, graceful shutdown (`Browser.close` → wait →
 //!   kill), one logical browser may own several OS processes.
@@ -39,13 +41,17 @@
 //! Only `Page.enable` is on by default (ref-counted, for lifecycle and
 //! dialog events).
 
-#![forbid(unsafe_code)]
+// `unsafe` is needed in exactly one place: `launch::sys` (`pre_exec` +
+// `dup2` to put the pipe ends on fd 3 / fd 4, and `kill(SIGTERM)`). That
+// module carries `#[allow(unsafe_code)]` and `// SAFETY:` comments.
+#![deny(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod actions;
 pub mod browser;
 pub mod cookies;
 pub mod discovery;
+pub mod display;
 pub mod error;
 pub mod input;
 pub mod launch;
@@ -54,12 +60,22 @@ pub mod observer;
 pub mod page;
 pub mod selector;
 pub mod world;
-pub mod xvfb;
 
 pub use browser::Browser;
-pub use discovery::find_chrome;
+pub use discovery::{chrome_or_skip, Found};
+pub use display::VirtualDisplay;
 pub use error::BrowserError;
-pub use launch::{CdpMode, LaunchOptions};
+pub use launch::{
+    launch, CdpMode, LaunchConfig, LaunchOptions, Launched, ProxySpec, TransportChoice,
+};
 pub use page::{Backing, Migration, Page};
 pub use selector::Selector;
 pub use world::World;
+
+/// Path-only discovery with no explicit override; `None` when nothing is
+/// found. Convenience for callers that only need a path (`surf doctor`);
+/// use [`discovery::find_chrome`] for the version, origin and the list of
+/// locations tried.
+pub fn find_chrome() -> Option<std::path::PathBuf> {
+    discovery::find_chrome(None).ok().map(|f| f.path)
+}

@@ -24,10 +24,13 @@ Dependency direction is strict: `cli → runtime → browser → cdp`, `runtime 
    evaluate with `Runtime.callFunctionOn{executionContextId}` /
    `Runtime.evaluate{contextId}`. World → runtime channel is
    `Runtime.addBinding{executionContextId}` + `Runtime.bindingCalled`.
-2. **Never** pass `--enable-automation`,
-   `--disable-blink-features=AutomationControlled`, or any `--disable-*`
-   the user did not write. The full flag list lives in
-   `surf_browser::launch::LaunchOptions::args` and nowhere else.
+2. **Never** pass `--enable-automation`. The **only** permitted
+   `--disable-*` is `--disable-blink-features=AutomationControlled`, on
+   browsers Surf launches (never when attaching) — Chrome sets
+   `navigator.webdriver` merely because a debugger pipe/port is configured
+   (DECISIONS.md #12). Any other `--disable-*` the user did not write is
+   forbidden. The full flag list lives in
+   `surf_browser::launch::LaunchConfig::args` and nowhere else.
    `--user-data-dir` is always passed (Chrome ≥ 136 ignores pipe/port on
    the default profile). `--headless` only when headless.
 3. `Page.enable` (ref-counted) is the only domain on by default.
@@ -53,12 +56,16 @@ cargo build -p surf-syntax -p surf-vm --target wasm32-unknown-unknown   # must s
 ```
 
 Tests that need Chrome use `surf_browser::discovery::chrome_or_skip(name)`:
-`SURF_CHROME=/path/to/chrome` overrides discovery; otherwise `PATH` and the
-platform defaults (`/Applications/Google Chrome.app/Contents/MacOS/Google
-Chrome`, `/usr/bin/google-chrome`, …) are tried; when nothing is found the
-test prints `skipping <name>: no Chrome found` and passes. They **must**
-actually run on your machine — do not merge on a skip. The e2e suite is
-`cargo test -p surf-cli --test e2e`.
+`SURF_CHROME=/path/to/chrome` overrides discovery (set-but-missing is an
+error, not a fallback); otherwise `~/.cache/surf/chrome`, the platform
+defaults (`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`,
+`/opt/google/chrome/chrome`, `google-chrome` on `PATH`, …) and the
+Playwright / Puppeteer / Apostate caches are tried; when nothing is found
+the test prints `skipping <name>: no Chrome/Chromium found …` with the
+locations tried and passes. They **must** actually run on your machine —
+do not merge on a skip. The e2e suite is `cargo test -p surf-cli --test
+e2e`; the launcher's own suite is `cargo test -p surf-browser --test
+launch` (needs a display for the headed test).
 
 Apostate (a Chromium fork under `~/Library/Caches/apostate`) is **not** a
 dependency. Never touch `~/apostate`. Surf must work with stock Chrome.

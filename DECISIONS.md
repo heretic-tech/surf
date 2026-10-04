@@ -103,3 +103,36 @@ domains Surf uses (`Target`, `Page`, `Runtime` minus `enable`, `Input`,
 `Emulation`, `Browser`), keeping compile time and binary size small; the
 rest is `Session::call_raw`. Rules out: a full-protocol crate dependency,
 hand-maintained structs for hundreds of methods.
+
+## 12. One permitted `--disable-*`: `--disable-blink-features=AutomationControlled`, on launched browsers only
+
+Quiet rule 2 assumed `navigator.webdriver` comes only from
+`--enable-automation`. Measured otherwise (macOS arm64, Google Chrome
+154.0.8037.95 stable, Chrome for Testing 133.0.6943.141 and 152.0.7977.54):
+
+* control, no CDP at all: `chrome --headless --user-data-dir=… --dump-dom
+  'data:text/html,…navigator.webdriver…'` → `wd=false`;
+* same command plus `--remote-debugging-port=0` → `wd=true`;
+* same command plus `--enable-automation` → `wd=true`;
+* through `surf_browser::launch` with the quiet set only (pipe **or** port,
+  headed **or** headless), the value read via `Target.createTarget` +
+  `Target.getTargets` titles — no session attached to the page, no
+  `Runtime.*` — all four combinations → `navigator.webdriver === true`.
+  The automation infobar is absent in every case (`outerHeight −
+  innerHeight` = 87 px at 1280×800 headed).
+
+Chromium does this on purpose: a configured `--remote-debugging-pipe` /
+`--remote-debugging-port` enables Blink's `AutomationControlled` runtime
+feature (https://issues.chromium.org/issues/40746300). It is a side effect
+Chrome imposes purely because a debugger transport exists, and the
+feature's only observable effect is `navigator.webdriver`. Surf therefore
+passes exactly one extra switch on every browser it **launches**:
+`--disable-blink-features=AutomationControlled`. It is the minimal
+correction of that side effect, not a stealth mode (Decision 4 stands: no
+flag toggles it). It is never added when attaching to a browser Surf did
+not launch (`cdp: "ws://…"`, `pool:`). Still forbidden:
+`--enable-automation` and every other `--disable-*` the user did not write.
+`crates/surf-browser/tests/launch.rs::webdriver_is_true_without_automationcontrolled_switch`
+launches without the switch and asserts `true`, so the reason cannot be
+"cleaned up" away. Supersedes the "never
+`--disable-blink-features=AutomationControlled`" wording in rule 2.
