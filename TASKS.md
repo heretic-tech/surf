@@ -177,11 +177,6 @@ seam, not beside it.
       which has no such input (IANA's 2025 redesign). Step 11 moved it to
       `www.wikipedia.org` / `input[name=search]` and verified every
       example in `examples/` runs against the live web.
-- [ ] `surf-browser/tests/pages.rs::auto_wait_and_timeouts` asserts
-      `text("#appeared")` took ≥ 500 ms; under a full `cargo test --workspace`
-      (several Chromes at once) the navigation can finish late enough that
-      the wait is shorter and the assertion fails. Seen once; passes in
-      isolation. Loosen to "the element was absent right after load".
 - [ ] The `print` sink is `println!` (line-buffered stdout); `emit` of very
       large documents should go through a `BufWriter` with an explicit
       flush before exit. Also: `surf run … | head` panics with `failed

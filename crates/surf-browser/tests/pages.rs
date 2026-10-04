@@ -326,14 +326,12 @@ async fn auto_wait_and_timeouts() {
         .await
         .unwrap();
 
-    // Appears after 800 ms: text() waits for attachment.
-    let t = Instant::now();
+    // Appended by a page timer after load: it is absent right after the
+    // navigation settles, and text() waits for attachment rather than
+    // failing. (No wall-clock floor — under a parallel workspace run the
+    // navigation itself can absorb most of the fixture's delay.)
+    assert!(!page.exists("#appeared").await.unwrap());
     assert_eq!(page.text("#appeared", opts()).await.unwrap(), "I appeared");
-    assert!(
-        t.elapsed() >= Duration::from_millis(500),
-        "{:?}",
-        t.elapsed()
-    );
 
     // Disabled-then-enabled: click waits; the spinner overlay (gone at
     // 600 ms) would otherwise cover it.
