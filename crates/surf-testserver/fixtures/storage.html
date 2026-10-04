@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Storage fixture</title></head>
+<body>
+  <h1>Storage</h1>
+  <ul id="ls"></ul>
+  <script>
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+    keys.sort();
+    for (const k of keys) {
+      const li = document.createElement('li');
+      li.textContent = k + '=' + localStorage.getItem(k);
+      document.getElementById('ls').appendChild(li);
+    }
+    if (keys.length === 0) document.getElementById('ls').textContent = 'empty';
+  </script>
+</body>
+</html>

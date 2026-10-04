@@ -1,0 +1,11 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Blocking fixture</title></head>
+<body>
+  <h1>Blocking</h1>
+  <img id="pixel" src="/img/pixel.png" onload="document.getElementById('img').textContent='image loaded'" onerror="document.getElementById('img').textContent='image blocked'">
+  <div id="img">image pending</div>
+  <div id="ad">ad pending</div>
+  <script src="/ads/banner.js" onerror="document.getElementById('ad').textContent='ad blocked'"></script>
+</body>
+</html>

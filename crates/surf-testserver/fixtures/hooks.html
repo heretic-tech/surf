@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Hooks fixture</title></head>
+<body>
+  <h1>Hooks</h1>
+  <div id="items">pending</div>
+  <div id="echo">pending</div>
+  <button id="again" onclick="load()">load again</button>
+  <script>
+    async function load() {
+      const r = await fetch('/api/items');
+      const j = await r.json();
+      document.getElementById('items').textContent = j.items.map(i => i.name).join(',');
+      const e = await fetch('/api/echo?from=page', { method: 'POST', headers: { 'content-type': 'text/plain', 'x-surf-test': 'yes' }, body: 'hello' });
+      const ej = await e.json();
+      document.getElementById('echo').textContent = ej.method + ' ' + ej.body + ' ' + (ej.headers['x-surf-test'] || '-') + ' ' + (ej.headers['x-added'] || '-');
+    }
+    load();
+  </script>
+</body>
+</html>
