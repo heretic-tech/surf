@@ -19,14 +19,23 @@
 //! ## Quiet rules enforced here
 //! This crate never sends `Runtime.enable`, never enables `DOM`, and never
 //! adds flags. It is deliberately dumb: it moves JSON frames. Policy lives in
-//! `surf-browser`. There is a debug assertion in [`Session::call_raw`] that
-//! rejects `Runtime.enable` and `DOM.enable` so a mistake upstream fails
-//! loudly in tests.
+//! `surf-browser`. [`Session::call_raw`] (and therefore `call` / `send`)
+//! refuses [`FORBIDDEN_METHODS`] with a `CdpError::Protocol` in every
+//! build, and the codegen does not emit typed commands for them, so a
+//! mistake upstream fails loudly.
 //!
 //! This crate is `Send + Sync` (tokio::sync internally) so a future
 //! thread-per-core runtime can shard connections (Decision 5).
+//!
+//! ## Tracing
+//! `Connection::set_trace(true)` or `SURF_TRACE_CDP=1` logs every frame at
+//! `debug` under the `surf_cdp::trace` target (`→` sent, `←` received).
 
-#![forbid(unsafe_code)]
+// Unix needs no `unsafe` at all (tokio creates the pipes). Windows needs
+// `CreatePipe` / `SetHandleInformation`, isolated in `transport::pipe::windows`
+// with `SAFETY:` comments.
+#![cfg_attr(not(windows), forbid(unsafe_code))]
+#![cfg_attr(windows, deny(unsafe_code))]
 #![warn(missing_docs)]
 
 pub mod connection;
@@ -34,15 +43,17 @@ pub mod error;
 pub mod event;
 pub mod protocol;
 pub mod session;
+#[cfg(test)]
+mod tests;
 pub mod transport;
 
 pub use connection::Connection;
 pub use error::CdpError;
 pub use event::Event;
-pub use protocol::Command;
+pub use protocol::{Command, ProtocolEvent};
 pub use session::{DomainGuard, Session};
 pub use transport::Transport;
 
 /// Methods that must never be sent (they produce page-observable side
-/// effects). Checked in debug builds by [`Session::call_raw`].
+/// effects). Refused by [`Session::call_raw`] in every build.
 pub const FORBIDDEN_METHODS: &[&str] = &["Runtime.enable", "DOM.enable"];
