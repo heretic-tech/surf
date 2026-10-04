@@ -291,6 +291,12 @@ impl Page {
         self.0.timeout.set(d);
     }
 
+    /// Proxy credentials the next [`rebind`](Self::rebind) installs
+    /// (`Browser::rebind_page_to` sets them when the context changes).
+    pub(crate) fn set_credentials(&self, credentials: Option<Credentials>) {
+        *self.0.credentials.borrow_mut() = credentials;
+    }
+
     /// Whether the page is still open.
     pub fn is_open(&self) -> bool {
         self.0.attached.borrow().is_some()

@@ -42,6 +42,21 @@ pub struct NewPageOptions {
     pub name: Option<String>,
 }
 
+/// Where [`Browser::rebind_page_to`] puts the page.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum RebindTarget {
+    /// A new target in the page's current browser context (cookies and
+    /// storage stay shared with the old target).
+    #[default]
+    SameContext,
+    /// A new, empty browser context — nothing shared — keeping the proxy
+    /// the page currently has (if any). `fresh: true` retries.
+    FreshContext,
+    /// A new, empty browser context behind `proxy`
+    /// (`scheme://[user:pass@]host:port`). `shift_proxy()`.
+    Proxy(String),
+}
+
 /// How the browser was obtained.
 enum Origin {
     Launched(Box<Launched>),
@@ -61,6 +76,8 @@ pub struct Browser {
     credentials: Option<Credentials>,
     /// Browser contexts created for pages: target id → context id.
     contexts: RefCell<HashMap<String, String>>,
+    /// Proxy URL per private context: context id → proxy.
+    context_proxies: RefCell<HashMap<String, String>>,
     next_index: Cell<usize>,
     closed: Cell<bool>,
 }
@@ -94,6 +111,7 @@ impl Browser {
             names: RefCell::new(HashMap::new()),
             credentials,
             contexts: RefCell::new(HashMap::new()),
+            context_proxies: RefCell::new(HashMap::new()),
             next_index: Cell::new(1),
             closed: Cell::new(false),
         }))
@@ -128,6 +146,7 @@ impl Browser {
             names: RefCell::new(HashMap::new()),
             credentials,
             contexts: RefCell::new(HashMap::new()),
+            context_proxies: RefCell::new(HashMap::new()),
             next_index: Cell::new(1),
             closed: Cell::new(false),
         }))
@@ -211,6 +230,11 @@ impl Browser {
             self.contexts
                 .borrow_mut()
                 .insert(backing.target_id.clone(), ctx.clone());
+            if let Some(proxy) = &opts.proxy {
+                self.context_proxies
+                    .borrow_mut()
+                    .insert(ctx.clone(), proxy.clone());
+            }
         }
         let index = self.next_index.get();
         self.next_index.set(index + 1);
@@ -248,7 +272,8 @@ impl Browser {
     }
 
     /// `page(n)`: the page with creation index `n` (1-based); creates every
-    /// missing page up to `n`.
+    /// missing page up to `n`. Indices never shift: a closed page's index
+    /// stays taken and `page(n)` for it is [`BrowserError::PageClosed`].
     pub async fn page(&self, index: usize) -> Result<Page, BrowserError> {
         if index == 0 {
             return Err(BrowserError::Config {
@@ -257,8 +282,17 @@ impl Browser {
             });
         }
         loop {
-            if let Some(p) = self.pages.borrow().get(index - 1).cloned() {
+            let found = self
+                .pages
+                .borrow()
+                .iter()
+                .find(|p| p.index() == index)
+                .cloned();
+            if let Some(p) = found {
                 return Ok(p);
+            }
+            if self.next_index.get() > index {
+                return Err(BrowserError::PageClosed { index });
             }
             self.new_page(NewPageOptions::default()).await?;
         }
@@ -310,6 +344,7 @@ impl Browser {
             self.names.borrow_mut().remove(&name);
         }
         if let Some(ctx) = target_id.and_then(|t| self.contexts.borrow_mut().remove(&t)) {
+            self.context_proxies.borrow_mut().remove(&ctx);
             if !self.conn.is_closed() {
                 let _ = self
                     .root()
@@ -322,6 +357,14 @@ impl Browser {
         Ok(())
     }
 
+    /// The proxy `page`'s private browser context was created with, if any
+    /// (`new_page(proxy:)` / [`RebindTarget::Proxy`]). The launch-level
+    /// `proxy:` is not reported here.
+    pub fn page_proxy(&self, page: &Page) -> Option<String> {
+        let ctx = page.backing()?.browser_context_id?;
+        self.context_proxies.borrow().get(&ctx).cloned()
+    }
+
     /// Move `page` onto a fresh target — in a new browser context with
     /// `proxy` when given, otherwise in the same context — migrating
     /// state per `migration` ([`Page::rebind`]). The old context (if
@@ -332,34 +375,77 @@ impl Browser {
         proxy: Option<&str>,
         migration: Migration,
     ) -> Result<(), BrowserError> {
+        let target = match proxy {
+            Some(p) => RebindTarget::Proxy(p.to_owned()),
+            None => RebindTarget::SameContext,
+        };
+        self.rebind_page_to(page, target, migration).await
+    }
+
+    /// Move `page` onto a fresh target per `target` ([`RebindTarget`]),
+    /// migrating state per `migration` ([`Page::rebind`]). A new context
+    /// gets the proxy's credentials (or none); the old private context is
+    /// disposed afterwards. The handle, index and name stay the same.
+    pub async fn rebind_page_to(
+        &self,
+        page: &Page,
+        target: RebindTarget,
+        migration: Migration,
+    ) -> Result<(), BrowserError> {
         let old = page.backing().ok_or(BrowserError::PageClosed {
             index: page.index(),
         })?;
         let root = self.root();
-        let context_id = match proxy {
-            Some(p) => {
-                let spec = ProxySpec::parse(p)?;
-                Some(
-                    root.send(target::CreateBrowserContext {
-                        proxy_server: Some(spec.server_arg()),
-                        dispose_on_detach: Some(true),
-                        ..Default::default()
-                    })
-                    .await?
-                    .browser_context_id,
-                )
-            }
-            None => old.browser_context_id.clone(),
+        let proxy = match &target {
+            RebindTarget::SameContext => None,
+            RebindTarget::FreshContext => self.page_proxy(page),
+            RebindTarget::Proxy(p) => Some(p.clone()),
         };
-        let backing = self.create_backing(context_id.clone()).await?;
+        let spec = proxy.as_deref().map(ProxySpec::parse).transpose()?;
+        let new_context = !matches!(target, RebindTarget::SameContext);
+        let context_id = if new_context {
+            Some(
+                root.send(target::CreateBrowserContext {
+                    proxy_server: spec.as_ref().map(ProxySpec::server_arg),
+                    dispose_on_detach: Some(true),
+                    ..Default::default()
+                })
+                .await?
+                .browser_context_id,
+            )
+        } else {
+            old.browser_context_id.clone()
+        };
+        let backing = match self.create_backing(context_id.clone()).await {
+            Ok(b) => b,
+            Err(e) => {
+                if let (Some(ctx), true) = (&context_id, context_id != old.browser_context_id) {
+                    let _ = root
+                        .send(target::DisposeBrowserContext {
+                            browser_context_id: ctx.clone(),
+                        })
+                        .await;
+                }
+                return Err(e);
+            }
+        };
         let new_target = backing.target_id.clone();
+        if new_context {
+            page.set_credentials(spec.as_ref().and_then(|s| s.credentials.clone()));
+        }
         page.rebind(backing, migration).await?;
         let old_ctx = self.contexts.borrow_mut().remove(&old.target_id);
         if let Some(ctx) = &context_id {
             self.contexts.borrow_mut().insert(new_target, ctx.clone());
+            if let (true, Some(p)) = (new_context, &proxy) {
+                self.context_proxies
+                    .borrow_mut()
+                    .insert(ctx.clone(), p.clone());
+            }
         }
         if let Some(ctx) = old_ctx {
             if Some(&ctx) != context_id.as_ref() {
+                self.context_proxies.borrow_mut().remove(&ctx);
                 let _ = root
                     .send(target::DisposeBrowserContext {
                         browser_context_id: ctx,
@@ -368,14 +454,6 @@ impl Browser {
             }
         }
         Ok(())
-    }
-
-    /// Rotate to the next proxy in `proxies`: launch a fresh process with
-    /// the new proxy and [`Page::rebind`] every page onto it.
-    pub async fn shift_proxy(self: &Rc<Self>) -> Result<(), BrowserError> {
-        Err(BrowserError::Unsupported(
-            "shift_proxy not implemented yet (task 8)".into(),
-        ))
     }
 
     /// Graceful shutdown. Launched: `Browser.close` → wait → `SIGTERM` →

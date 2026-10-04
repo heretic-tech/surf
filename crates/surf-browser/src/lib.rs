@@ -68,7 +68,7 @@ pub mod util;
 pub mod world;
 
 pub use actions::{ActionOptions, Element};
-pub use browser::{Browser, NewPageOptions};
+pub use browser::{Browser, NewPageOptions, RebindTarget};
 pub use cookies::Cookie;
 pub use discovery::{chrome_or_skip, Found};
 pub use display::VirtualDisplay;

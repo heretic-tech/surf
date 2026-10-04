@@ -14,7 +14,8 @@ use serde_json::json;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use surf_browser::{
-    ActionOptions, BrowserError, Cookie, DialogPolicy, Migration, NewPageOptions, WaitUntil,
+    ActionOptions, BrowserError, Cookie, DialogPolicy, Migration, NewPageOptions, RebindTarget,
+    WaitUntil,
 };
 
 fn opts() -> ActionOptions {
@@ -745,6 +746,92 @@ async fn browser_contexts_isolate_cookies_and_rebind_migrates() {
     assert_eq!(after.browser_context_id, None);
     assert_eq!(a.url().await.unwrap(), fx.url("/cookie-echo"));
     assert_eq!(a.text("body", opts()).await.unwrap(), "who=alice");
+
+    b.close().await.unwrap();
+}
+
+/// `rebind_page_to`: `FreshContext` lands in a new, empty context (cookies
+/// gone) and keeps the page's proxy; `Proxy` changes it; the handle, index
+/// and name survive. Closed indices stay taken (`page(n)` for one is an
+/// error, `page(n+1)` still auto-creates).
+#[tokio::test]
+async fn rebind_targets_and_closed_indices() {
+    let Some(b) = browser("rebind_targets_and_closed_indices").await else {
+        return;
+    };
+    let fx = Fixture::start().await;
+    let proxy_a = surf_testserver::Proxy::start("A").await;
+    let proxy_b = surf_testserver::Proxy::start("B").await;
+    let page = b
+        .new_page(NewPageOptions {
+            name: Some("job".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.index(), 1);
+    page.goto(&fx.url("/set-cookie?who=alice"), WaitUntil::Load)
+        .await
+        .unwrap();
+    assert_eq!(page.cookies().await.unwrap().len(), 1);
+    assert_eq!(b.page_proxy(&page), None);
+
+    // Fresh context: no cookies, same handle / index / name, no proxy yet.
+    b.rebind_page_to(&page, RebindTarget::FreshContext, Migration::default())
+        .await
+        .unwrap();
+    assert!(page.is_open());
+    assert_eq!(page.index(), 1);
+    assert_eq!(page.name().as_deref(), Some("job"));
+    assert!(page.backing().unwrap().browser_context_id.is_some());
+    assert!(page.cookies().await.unwrap().is_empty());
+    assert_eq!(b.page_proxy(&page), None);
+
+    // Proxy: a new context behind A (loopback hosts bypass proxies, so the
+    // registry is what we check), then FreshContext keeps A, Proxy(B) swaps.
+    b.rebind_page_to(
+        &page,
+        RebindTarget::Proxy(proxy_a.url.clone()),
+        Migration::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(b.page_proxy(&page).as_deref(), Some(proxy_a.url.as_str()));
+    let ctx_a = page.backing().unwrap().browser_context_id;
+    b.rebind_page_to(&page, RebindTarget::FreshContext, Migration::default())
+        .await
+        .unwrap();
+    assert_eq!(b.page_proxy(&page).as_deref(), Some(proxy_a.url.as_str()));
+    assert_ne!(page.backing().unwrap().browser_context_id, ctx_a);
+    b.rebind_page_to(
+        &page,
+        RebindTarget::Proxy(proxy_b.url.clone()),
+        Migration::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(b.page_proxy(&page).as_deref(), Some(proxy_b.url.as_str()));
+    // Same context keeps the proxy and the context.
+    let ctx_b = page.backing().unwrap().browser_context_id;
+    b.rebind_page_to(&page, RebindTarget::SameContext, Migration::default())
+        .await
+        .unwrap();
+    assert_eq!(page.backing().unwrap().browser_context_id, ctx_b);
+    assert_eq!(b.page_proxy(&page).as_deref(), Some(proxy_b.url.as_str()));
+    page.goto(&fx.url("/"), WaitUntil::Load).await.unwrap();
+    assert_eq!(page.title().await.unwrap(), "Index");
+
+    // Closed indices do not shift and are not re-created.
+    let second = b.page(2).await.unwrap();
+    b.close_page(&page).await.unwrap();
+    assert_eq!(b.page_proxy(&page), None);
+    assert!(matches!(
+        b.page(1).await,
+        Err(BrowserError::PageClosed { index: 1 })
+    ));
+    assert_eq!(b.page(2).await.unwrap().index(), second.index());
+    assert_eq!(b.page(3).await.unwrap().index(), 3);
+    assert_eq!(b.pages().len(), 2);
 
     b.close().await.unwrap();
 }

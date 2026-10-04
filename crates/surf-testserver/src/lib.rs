@@ -12,10 +12,17 @@
 //! | `/cookie-echo` | the request's `Cookie` header as `text/plain` |
 //! | `/set-cookie?name=value` | sets `name=value; Path=/` |
 //! | `/slow?ms=N` | answers after `N` ms |
+//! | `/proxy-echo` | the request's `X-Surf-Proxy` header (`none` without one) as `text/plain` |
+//!
+//! [`proxy::Proxy`] is a forward-proxy stub that tags what it forwards with
+//! `X-Surf-Proxy`, so a script can prove which proxy a page went through.
 //!
 //! Not published; a dev-dependency only.
 
 #![forbid(unsafe_code)]
+
+pub mod proxy;
+pub use proxy::Proxy;
 
 use axum::extract::Query;
 use axum::http::{header, HeaderMap, StatusCode};
@@ -70,6 +77,7 @@ pub fn router() -> Router {
         .route("/cookie-echo", get(cookie_echo))
         .route("/set-cookie", get(set_cookie))
         .route("/slow", get(slow))
+        .route("/proxy-echo", get(proxy_echo))
         .route("/{file}", get(file))
 }
 
@@ -116,6 +124,16 @@ async fn set_cookie(Query(q): Query<HashMap<String, String>>) -> Response {
         }
     }
     (headers, Html("<!doctype html><title>cookie set</title>ok")).into_response()
+}
+
+/// Echo the `X-Surf-Proxy` header a [`Proxy`] stub adds (`none` without).
+async fn proxy_echo(headers: HeaderMap) -> Response {
+    let via = headers
+        .get("x-surf-proxy")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("none")
+        .to_owned();
+    ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], via).into_response()
 }
 
 /// `/slow?ms=N` answers after `N` ms.
