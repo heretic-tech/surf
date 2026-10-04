@@ -72,6 +72,8 @@ pub struct Connection {
     routes: Mutex<Routes>,
     closed: AtomicBool,
     closed_tx: watch::Sender<bool>,
+    /// Set by [`mark_crashed`](Self::mark_crashed): `(exit_code, stderr_tail)`.
+    crash: Mutex<Option<(Option<i32>, String)>>,
     trace: AtomicBool,
     /// Serialises `Domain.enable` / `Domain.disable` traffic.
     pub(crate) domain_lock: tokio::sync::Mutex<()>,
@@ -95,6 +97,7 @@ impl Connection {
             routes: Mutex::new(HashMap::new()),
             closed: AtomicBool::new(false),
             closed_tx,
+            crash: Mutex::new(None),
             trace: AtomicBool::new(trace),
             domain_lock: tokio::sync::Mutex::new(()),
             domain_counts: Mutex::new(HashMap::new()),
@@ -164,6 +167,31 @@ impl Connection {
         let _ = self.outgoing.send(Outgoing::Close);
     }
 
+    /// The browser process died unexpectedly: close the connection and make
+    /// every in-flight and future call fail with
+    /// [`CdpError::BrowserCrashed`] (carrying `exit_code` and the last lines
+    /// of stderr) instead of the bare [`CdpError::Closed`]. Called by the
+    /// launcher's process watcher; a no-op if already closed.
+    pub fn mark_crashed(&self, exit_code: Option<i32>, stderr_tail: String) {
+        if self.is_closed() {
+            return;
+        }
+        *self.crash.lock().expect("crash poisoned") = Some((exit_code, stderr_tail));
+        self.mark_closed();
+        let _ = self.outgoing.send(Outgoing::Close);
+    }
+
+    /// The error a call gets once the connection is closed.
+    fn closed_error(&self) -> CdpError {
+        match &*self.crash.lock().expect("crash poisoned") {
+            Some((exit_code, stderr_tail)) => CdpError::BrowserCrashed {
+                exit_code: *exit_code,
+                stderr_tail: stderr_tail.clone(),
+            },
+            None => CdpError::Closed,
+        }
+    }
+
     /// Allocate an id, queue the frame, await the matching response.
     pub(crate) async fn request(
         &self,
@@ -179,7 +207,7 @@ impl Connection {
             });
         }
         if self.is_closed() {
-            return Err(CdpError::Closed);
+            return Err(self.closed_error());
         }
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
@@ -219,9 +247,9 @@ impl Connection {
             tracing::debug!(target: TRACE_TARGET, "→ {}", trace_text(&frame));
         }
         if self.outgoing.send(Outgoing::Frame(frame)).is_err() {
-            return Err(CdpError::Closed);
+            return Err(self.closed_error());
         }
-        let result = rx.await.unwrap_or(Err(CdpError::Closed));
+        let result = rx.await.unwrap_or_else(|_| Err(self.closed_error()));
         guard.armed = false;
         result
     }
@@ -368,7 +396,7 @@ impl Connection {
             .drain()
             .collect();
         for (_, p) in pending {
-            let _ = p.tx.send(Err(CdpError::Closed));
+            let _ = p.tx.send(Err(self.closed_error()));
         }
         self.routes.lock().expect("routes poisoned").clear();
         // `send` would be a no-op without live receivers; `send_replace`

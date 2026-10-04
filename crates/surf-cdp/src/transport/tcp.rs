@@ -34,7 +34,9 @@ pub async fn connect(host: &str, port: u16) -> io::Result<WsTransport> {
     WsTransport::connect(&url).await
 }
 
-/// Minimal HTTP/1.1 GET returning the response body.
+/// Minimal HTTP/1.1 GET returning the response body. Chrome ignores
+/// `Connection: close` and keeps the socket open, so reading stops as soon
+/// as `Content-Length` bytes of body have arrived (EOF otherwise).
 pub(crate) async fn http_get(host: &str, port: u16, path: &str) -> io::Result<Vec<u8>> {
     let mut stream = TcpStream::connect((host, port)).await?;
     let req = format!(
@@ -42,8 +44,36 @@ pub(crate) async fn http_get(host: &str, port: u16, path: &str) -> io::Result<Ve
     );
     stream.write_all(req.as_bytes()).await?;
     let mut raw = Vec::with_capacity(1024);
-    stream.read_to_end(&mut raw).await?;
+    let mut buf = [0u8; 4096];
+    loop {
+        if let Some(end) = response_complete(&raw) {
+            raw.truncate(end);
+            break;
+        }
+        let n = stream.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        raw.extend_from_slice(&buf[..n]);
+    }
     parse_response(&raw)
+}
+
+/// If the headers are in and `Content-Length` bytes of body have arrived,
+/// the total length of the response; `None` while more is needed (or when
+/// there is no `Content-Length`, in which case EOF delimits the body).
+fn response_complete(raw: &[u8]) -> Option<usize> {
+    let sep = raw.windows(4).position(|w| w == b"\r\n\r\n")?;
+    let head = String::from_utf8_lossy(&raw[..sep]);
+    let len = head.lines().skip(1).find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.trim()
+            .eq_ignore_ascii_case("content-length")
+            .then(|| value.trim().parse::<usize>().ok())
+            .flatten()
+    })?;
+    let total = sep + 4 + len;
+    (raw.len() >= total).then_some(total)
 }
 
 /// Split status line / headers / body; check the status is 200.
@@ -87,6 +117,21 @@ fn parse_response(raw: &[u8]) -> io::Result<Vec<u8>> {
 mod tests {
     use super::*;
     use tokio::net::TcpListener;
+
+    #[test]
+    fn completeness_follows_content_length() {
+        assert_eq!(response_complete(b"HTTP/1.1 200 OK\r\n"), None);
+        assert_eq!(
+            response_complete(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n{}"),
+            None
+        );
+        assert_eq!(
+            response_complete(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n{\"\"}extra"),
+            Some(42)
+        );
+        // No Content-Length: only EOF can end it.
+        assert_eq!(response_complete(b"HTTP/1.1 200 OK\r\n\r\n{}"), None);
+    }
 
     #[test]
     fn parses_status_and_content_length() {

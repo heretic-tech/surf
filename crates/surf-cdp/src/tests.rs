@@ -278,6 +278,33 @@ async fn hang_up_fails_pending_calls_and_closes_everything() {
 }
 
 #[tokio::test]
+async fn mark_crashed_fails_pending_and_future_calls_with_browser_crashed() {
+    let (conn, mut browser) = connect();
+    let root = conn.root();
+    let r = root.clone();
+    let call = tokio::spawn(async move { r.call_raw("Browser.getVersion", json!({})).await });
+    browser.next_sent().await;
+    conn.mark_crashed(Some(133), "[fatal] boom".into());
+    match call.await.unwrap() {
+        Err(CdpError::BrowserCrashed {
+            exit_code,
+            stderr_tail,
+        }) => {
+            assert_eq!(exit_code, Some(133));
+            assert_eq!(stderr_tail, "[fatal] boom");
+        }
+        other => panic!("expected BrowserCrashed, got {other:?}"),
+    }
+    conn.wait_closed().await;
+    assert!(conn.is_closed());
+    assert!(matches!(
+        root.call_raw("Browser.getVersion", json!({})).await,
+        Err(CdpError::BrowserCrashed { .. })
+    ));
+    assert!(browser.sent.recv().await.is_none(), "transport dropped");
+}
+
+#[tokio::test]
 async fn close_ends_the_driver() {
     let (conn, mut browser) = connect();
     conn.close();
