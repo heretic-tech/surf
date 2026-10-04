@@ -212,7 +212,9 @@ profile removed) **96 ms**. The 50-concurrent-pages e2e test runs in
 ≈ 3 s end to end (debug).
 
 Budgets are asserted only in release builds; a debug run prints the
-numbers and says so (`tests/perf.rs`).
+numbers and says so (`tests/perf.rs`). The same numbers next to
+Playwright's and Puppeteer's (startup, RSS, commands sent, flags, domains
+enabled) are in `docs/comparison.md`.
 
 ## 6. `surf doctor`
 
@@ -237,7 +239,27 @@ from a temp file, types / hovers / clicks, and prints the table; exit 1 if
 any non-informational check fails. On Linux the display line also reports
 `Xvfb` presence for `virtual: true`.
 
-## 7. Known gaps
+## 7. Live status at v0.1.0
+
+As of the release commit (2026-10-04, Chrome 154.0.8037.95, this Mac):
+
+* local detector: every non-informational check `PASS`, headless and
+  headed (e2e `detector` / `detector-headed`; `surf doctor --detector`
+  exit 0);
+* noisy control (`tools/detector/control.py`): `runtime-enable-stack` and
+  `webdriver` `FAIL` — the replica is not vacuous;
+* bot-detector.rebrowser.net: nothing red (`runtimeEnableLeak`,
+  `navigatorWebdriver`, `viewport`, `pwInitScripts`, `bypassCsp`,
+  `useragent` green; main-world traps untriggered from the isolated world);
+* bot.sannysoft.com: every row passed, 20 fingerprint-scanner rows `ok`;
+* browserscan.net/bot-detection: **Normal**, CDP *Normal*, Dev Tool
+  *Normal*;
+* perf gates: 1.8 ms / 6.1 MB / 39–47 ms (§5), all under budget.
+
+Re-run `tools/live-detectors.surf` and `cargo test --release --test perf`
+before quoting any of this for a later Chrome.
+
+## 8. Known gaps
 
 * **Headless UA.** New headless Chrome reports `HeadlessChrome/…` in
   `navigator.userAgent` (and `Browser.getVersion`). Surf does not rewrite
