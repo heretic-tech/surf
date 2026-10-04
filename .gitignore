@@ -6,3 +6,8 @@
 *.log
 /tmp-profiles/
 .DS_Store
+# volatile agent-tool state (changes on every step)
+.empryo/orchestrations/runs/
+.empryo/desktop/
+.empryo/desktop-owned-sessions.json
+.empryo/background/
