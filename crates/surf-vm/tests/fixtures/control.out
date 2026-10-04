@@ -1,0 +1,28 @@
+1
+2
+3
+incl 1
+incl 2
+incl 3
+range 0
+range 1
+49 [1,2,3] 1
+while 1
+while 3
+loop 1
+loop 3
+loop 5
+0 0
+0 1
+1 0
+1 1
+2 0
+2 1
+try 1
+after 2
+elif
+11
+12
+21
+22
+false

@@ -1,0 +1,17 @@
+[declare] fn risky(n)
+[declare] fn deep()
+[declare] fn early()
+no button: element not found sel=#missing-button cdp=DOM.querySelector line=2
+[click] #ok timeout=1s
+caught without binding
+inner caught inner
+outer caught rethrown inner line=15
+[1,"err(.x)","err(.x)"]
+through native: from deep
+yes
+assertion failed: math works
+returned from try
+nil has no method `foo`
+cannot call a value of type int
+map cannot call a value of type int
+error: uncaught at top level (line 70)

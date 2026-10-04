@@ -1,0 +1,17 @@
+hello world, 1+1=2
+nested inner world done
+brace {literal} and quote " and tab	end
+unicode 😀
+Hello, World HELLO, WORLD hello, world 16 12
+["a","b","c"] ["a","b","c"] ["a","b","c"]
+x+y true true true
+43 5.0 7 1000.0
+["l1","l2"] é o 5
+a/b x,1,nil
+ABC x true ["a","b"]
+2 -1 el lo
+1 nil [1,"a"] {"k":[true]} 1.5 2.0
+[] nil true [1,2] {"a":null}
+chars: ["a","b"]
+h
+i

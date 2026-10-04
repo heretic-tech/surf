@@ -1,0 +1,17 @@
+{"text":"a","href":"/x","n":1,"f":2.5,"ok":true,"none":null,"list":[1,"2"],"d":2000}
+42
+"str"
+[1,[2,3]]
+null
+null
+{"a":[1,null]} "s" 1.5
+{"a":1} [
+  1,
+  {
+    "b": 2
+  }
+]
+{"a":[1,2.5,"x",null,true],"b":{"c":1}} 2.5 1 nil map
+[1,2] 3 q
+invalid JSON: key must be a string at line 1 column 2
+{"r":[1,2]}

@@ -1,0 +1,16 @@
+print(500ms, 2s, 3m, 1h, 1.5s, 0ms, 90s, 1500ms)
+print(2s + 500ms, 2s - 500ms, 2 * 1s, 1s * 3, 6s / 2, 1.5 * 2s)
+print(2s > 500ms, 1000ms == 1s, 1s < 2s)
+print((2s).ms(), (1500ms).seconds(), int(2s), float(500ms))
+sleep(250ms)
+sleep(1s)
+try:
+    print(2s + 1)
+catch e:
+    print(e.message)
+try:
+    print(1s - 2s)
+catch e:
+    print(e.message)
+emit {d: 1500ms}
+print("{2s}")

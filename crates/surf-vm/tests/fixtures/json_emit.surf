@@ -1,0 +1,16 @@
+emit {text: "a", href: "/x", n: 1, f: 2.5, ok: true, none: nil, list: [1, "2"], d: 2s}
+emit 42
+emit "str"
+emit [1, [2, 3]]
+emit nil
+emit fn(x): x
+print(json({a: [1, nil]}), json("s"), json(1.5))
+print(json.stringify({a: 1}), json.stringify([1, {b: 2}], pretty: true))
+v = parse_json("\{\"a\": [1, 2.5, \"x\", null, true], \"b\": \{\"c\": 1}}")
+print(v, v.a[1], v.b.c, type(v.a[3]), type(v))
+print(json.parse("[1,2]"), json.parse("3"), json.parse("\"q\""))
+try:
+    parse_json("\{bad")
+catch e:
+    print(e.message)
+emit {r: 1..3}

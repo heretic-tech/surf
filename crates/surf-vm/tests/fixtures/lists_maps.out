@@ -1,0 +1,23 @@
+1 3 3
+[1,20,3,4] 5 [1,20,3,4]
+1 4 nil true false 2
+[2,40,6,8] [20,3,4] [4,3,20,1] [1,20,3,4]
+[1,2,3] ["a","b"] [3,2,1]
+["al","bo"] al
+[2,3] [2,3]
+6
+a a 1 2 nil
+{"name":"a","with space":1,"key":2,"count":3,"other":4} ["name","with space","key","count","other"] ["a",1,2,3,4] 5 5
+true false nil dflt 3 ["name","with space","key","other"]
+[["name","a"],["with space",1],["key",2],["other",4],["z",26]]
+deep 1
+{"a":{"b":[100,{"c":"deep"}]}}
+hi bob
+list index 10 out of range (len 4)
+map key must be a string, got int
+true [1,20,3,4,99]
+name a
+with space 1
+key 2
+other 4
+z 26

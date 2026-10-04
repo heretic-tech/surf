@@ -1,0 +1,92 @@
+base = 21
+print(hoisted(2))
+
+fn hoisted(x):
+    return x * base
+
+fn fib(n):
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+print(fib(15))
+
+fn greet(name, greeting: "hello", punct: "!"):
+    return "{greeting} {name}{punct}"
+
+print(greet("a"), greet("b", "hi"), greet("c", punct: "?"), greet(punct: ".", name: "d"))
+
+fn make_counter():
+    count = 0
+    fn inc():
+        count = count + 1
+        return count
+    return inc
+
+c1 = make_counter()
+c2 = make_counter()
+print(c1(), c1(), c1(), c2())
+
+double = fn(x): x * 2
+apply = fn(f, v): f(v)
+print(apply(double, 4), apply(fn(x): x + 1, 4))
+
+block = fn(e):
+    y = e * 2
+    return y + 1
+print(block(5))
+
+fn nothing():
+    return
+print(nothing(), type(nothing), type(double))
+
+adders = []
+for i in 1..=3:
+    adders.push(fn(x): x + i)
+print(adders.map(fn(f): f(10)))
+
+fn outer():
+    v = "outer"
+    fn middle():
+        fn inner():
+            return v
+        return inner()
+    return middle()
+print(outer())
+
+shared = 1
+fn bump():
+    shared = shared + 1
+bump()
+bump()
+print(shared)
+
+try:
+    greet()
+catch e:
+    print(e.message)
+try:
+    greet("a", "b", "c", "d")
+catch e:
+    print(e.message)
+try:
+    greet("a", nope: 1)
+catch e:
+    print(e.message)
+try:
+    undefined_fn(1)
+catch e:
+    print(e.message)
+try:
+    print(undefined_var)
+catch e:
+    print(e.message)
+
+fn compose(f, g):
+    return fn(x): g(f(x))
+inc_then_double = compose(fn(x): x + 1, double)
+print(inc_then_double(3))
+
+g = len
+print(g([1, 2, 3]), g)
+print([1, 2, 3].map(str), ["1", "2"].map(int))

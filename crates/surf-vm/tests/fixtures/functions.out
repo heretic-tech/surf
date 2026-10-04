@@ -1,0 +1,26 @@
+[declare] fn hoisted(x)
+[declare] fn fib(n)
+[declare] fn greet(name, greeting, punct)
+[declare] fn make_counter()
+[declare] fn nothing()
+[declare] fn outer()
+[declare] fn bump()
+[declare] fn compose(f, g)
+42
+610
+hello a! hi b! hello c? hello d.
+1 2 3 1
+8 5
+11
+nil fn fn
+[13,13,13]
+outer
+3
+`greet`: missing argument `name`
+`greet` takes 3 arguments but 4 were given
+`greet` has no parameter `nope`
+unknown function `undefined_fn`
+undefined variable `undefined_var`
+8
+3 <fn>
+["1","2","3"] [1,2]

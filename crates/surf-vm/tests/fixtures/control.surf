@@ -1,0 +1,48 @@
+for i in 1..4:
+    print(i)
+for i in 1..=3:
+    print("incl", i)
+for i in range(2):
+    print("range", i)
+print(len(1..50), (1..4).to_list(), (0..3)[1])
+n = 0
+while n < 3:
+    n = n + 1
+    if n == 2:
+        continue
+    print("while", n)
+count = 0
+loop:
+    count = count + 1
+    if count > 5:
+        break
+    if count % 2 == 0:
+        continue
+    print("loop", count)
+for i in 0..3:
+    for j in 0..3:
+        if j == 2:
+            break
+        print(i, j)
+for x in [1, 2, 3]:
+    try:
+        if x == 2:
+            break
+        print("try", x)
+    catch e:
+        print("never")
+print("after", x)
+if false:
+    print("no")
+elif true:
+    print("elif")
+else:
+    print("no")
+r = 1..3
+for a in r:
+    for b in r:
+        print("{a}{b}")
+empty_loop_ran = false
+for q in []:
+    empty_loop_ran = true
+print(empty_loop_ran)

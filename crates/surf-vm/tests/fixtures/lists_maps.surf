@@ -1,0 +1,45 @@
+xs = [1, 2, 3]
+print(xs[0], xs[-1], len(xs))
+xs[1] = 20
+push(xs, 4)
+xs.push(5)
+print(xs, xs.pop(), xs)
+print(xs.first(), xs.last(), [].first(), xs.contains(20), xs.contains(99), xs.index_of(3))
+print(xs.map(fn(x): x * 2), xs.filter(fn(x): x > 2), xs.reverse(), xs)
+print([3, 1, 2].sort(), ["b", "a"].sort(), [3, 1, 2].sort(reverse: true))
+people = [{name: "bo", age: 30}, {name: "al", age: 25}]
+print(people.sort(fn(p): p.age).map(fn(p): p.name), people.sort(by: fn(p): p.name)[0].name)
+print([1, 2, 3, 4].slice(1, 3), [1, 2, 3].slice(-2))
+total = 0
+add = fn(x):
+    total = total + x
+nums = [1, 2, 3]
+nums.each(add)
+print(total)
+m = {name: "a", "with space": 1, ["k" + "ey"]: 2}
+print(m.name, m["name"], m["with space"], m.key, m.missing)
+m.count = 3
+m["other"] = 4
+print(m, keys(m), values(m), len(m), m.len())
+print(m.has("name"), m.has("nope"), m.get("nope"), m.get("nope", "dflt"), m.remove("count"), m.keys())
+m.set("z", 26)
+print(m.entries())
+nested = {a: {b: [1, {c: "deep"}]}}
+print(nested.a.b[1].c, nested["a"]["b"][0])
+nested.a.b[0] = 100
+print(nested)
+handlers = {greet: fn(who): "hi {who}"}
+print(handlers.greet("bob"))
+try:
+    print(xs[10])
+catch e:
+    print(e.message)
+try:
+    print(m[1])
+catch e:
+    print(e.message)
+alias = xs
+alias.push(99)
+print(xs == alias, xs)
+for k in m:
+    print(k, m[k])

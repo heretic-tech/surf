@@ -1,0 +1,33 @@
+# Arithmetic, comparison, logic
+print(1 + 2 * 3, (1 + 2) * 3, 7 / 2, -7 / 2, 7 % 3, 2.5 * 2, 1 / 4.0)
+print(10 - 3 - 2, 2 * 3 + 4, 1 + 2.0)
+print(1 == 1.0, 1 != 2, "a" < "b", 2 <= 2, 3 > 4, 3.5 >= 3)
+print([1, 2] == [1, 2], {a: 1} == {a: 1}, [1, [2]] == [1, [2]], nil == nil, "1" == 1)
+print(nil or 3, 0 or "x", 1 and 2, nil and 2, not nil, not 1, not "")
+print(-(-5), -2.5)
+print(true and false or true)
+print("ab" + "cd", [1] + [2, 3])
+x = 10
+x = x + 5
+print(x)
+print(1_000 + 1)
+if 0:
+    print("zero is truthy")
+elif "":
+    print("empty is truthy")
+elif []:
+    print("empty list is truthy")
+else:
+    print("falsy things are falsy")
+try:
+    print(1 / 0)
+catch e:
+    print("error: {e.message}")
+try:
+    print(1 + "a")
+catch e:
+    print("error: {e.message}")
+try:
+    print(1 < "a")
+catch e:
+    print("error: {e.message}")

@@ -1,0 +1,3 @@
+[declare] fn f()
+before
+exit: 4

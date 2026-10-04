@@ -1,0 +1,8 @@
+print("before")
+fn f():
+    try:
+        exit(4)
+    catch e:
+        print("never")
+f()
+print("after")

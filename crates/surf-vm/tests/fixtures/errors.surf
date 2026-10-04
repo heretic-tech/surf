@@ -1,0 +1,71 @@
+try:
+    click("#missing-button", timeout: 2s)
+catch e:
+    print("no button: {e.message} sel={e.selector} cdp={e.cdp_method} line={e.line}")
+click("#ok", timeout: 1s)
+try:
+    fail("custom")
+catch:
+    print("caught without binding")
+try:
+    try:
+        fail("inner")
+    catch e:
+        print("inner caught {e.message}")
+        fail("rethrown {e.message}")
+catch e2:
+    print("outer caught {e2.message} line={e2.line}")
+
+fn risky(n):
+    if n > 1:
+        fail("too big: {n}", selector: ".x")
+    return n
+
+results = []
+for n in [1, 2, 3]:
+    try:
+        results.push(risky(n))
+    catch e:
+        results.push("err({e.selector})")
+print(results)
+
+fn deep():
+    fail("from deep")
+
+try:
+    [1].map(fn(x): deep())
+catch e:
+    print("through native: {e.message}")
+
+ok = "no"
+try:
+    ok = "yes"
+catch e:
+    ok = "catch ran"
+print(ok)
+
+try:
+    assert(1 == 2, "math works")
+catch e:
+    print(e.message)
+assert(true)
+
+fn early():
+    try:
+        return "returned from try"
+    catch e:
+        return "nope"
+print(early())
+
+try:
+    x = nil
+    x.foo()
+catch e:
+    print(e.message)
+try:
+    1()
+catch e:
+    print(e.message)
+print(type(e), e.message)
+fail("uncaught at top level")
+print("not reached")

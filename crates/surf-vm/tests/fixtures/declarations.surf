@@ -1,0 +1,87 @@
+browser:
+    cdp: pipe
+    engine: chrome
+    headless: false
+    size: "1280x800"
+    pool: env("SURF_POOL")
+    flags: ["--lang=en-US", "--{env("SURF_TEST_VAR")}"]
+    timeout: 30s
+    proxies: ["http://a:1", "http://b:1"]
+
+browser work:
+    headless: true
+
+print("first statement")
+
+fn helper(x):
+    return x + offset
+
+offset = 100
+
+task fetch(url, mode: "fast"):
+    retry: 2
+    on_fail: rotate()
+    timeout: 60s
+    fresh: true
+    attempts.push(url)
+    if len(attempts) < 3:
+        fail("flaky {url}")
+    return "fetched {url} in {mode} mode"
+
+attempts = []
+rotations = 0
+
+fn rotate():
+    rotations = rotations + 1
+    return "rotated {rotations}"
+
+actor Scout():
+    retry: 1
+    return "scout done"
+
+actor Worker(n):
+    return "worker {n}"
+
+supervisor Crew:
+    strategy: one_for_one
+    max_restarts: 3
+    within: 60s
+    spawn Scout()
+    parallel for n in 1..=2:
+        spawn Worker(n)
+
+on element_appears(".checkout"):
+    print("appeared {event}")
+
+on dialog:
+    print("dialog")
+
+on navigation("*/login*", "extra"):
+    print(event.url)
+
+print(helper(1))
+print(fetch("http://x", mode: "slow"))
+print(attempts, rotations)
+h = spawn helper(5)
+print(h.join(), h.id)
+print((spawn Worker(7)).join())
+results = []
+parallel for u in ["a", "b", "c"]:
+    limit: 2
+    fail_fast: false
+    results.push("got {u}")
+print(results)
+parallel for i in 1..=2:
+    results.push(i)
+print(results)
+try:
+    parallel for i in [1, 2]:
+        fail_fast: true
+        fail("boom {i}")
+catch e:
+    print(e.message)
+try:
+    parallel for i in [1, 2]:
+        fail("boom {i}")
+catch e:
+    print(e.message)

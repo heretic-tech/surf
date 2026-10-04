@@ -1,0 +1,39 @@
+print(len([1, 2]), len("abc"), len({a: 1}), len(1..4))
+print(type(1), type(1.5), type("s"), type(nil), type(true), type([]), type({}), type(2s), type(fn(): 1), type(1..2))
+print(int(3.9), int("12"), int(true), float(2), float("0.5"))
+print(range(3).to_list(), range(2, 5).to_list(), (1..1).to_list())
+r = random()
+print(r >= 0 and r < 1, type(r))
+n = random(10)
+print(n >= 0 and n < 10, type(n))
+k = random(5, 7)
+print(k >= 5 and k < 7)
+print(now() > 1700000000000)
+print(env("SURF_TEST_VAR"), env("NOPE"), env("NOPE", "fallback"))
+write_file("/tmp/x.txt", "hello")
+append_file("/tmp/x.txt", " world")
+print(read_file("/tmp/x.txt"), fs.exists("/tmp/x.txt"), fs.exists("/nope"))
+fs.write("/tmp/y.txt", "y")
+fs.append("/tmp/y.txt", "!")
+print(fs.read("/tmp/y.txt"))
+try:
+    read_file("/missing")
+catch e:
+    print(e.message)
+try:
+    len(5)
+catch e:
+    print(e.message)
+try:
+    int("x")
+catch e:
+    print(e.message)
+try:
+    json.nope()
+catch e:
+    print(e.message)
+try:
+    click("#a", bogus: 1)
+catch e:
+    print(e.message)
+print(sleep(5ms))

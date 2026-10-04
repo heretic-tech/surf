@@ -1,0 +1,31 @@
+[declare] browser: {"cdp":"pipe","engine":"chrome","headless":false,"size":"1280x800","pool":"wss://pool.example","flags":["--lang=en-US","--hello"],"timeout":30000,"proxies":["http://a:1","http://b:1"]}
+[declare] browser work: {"headless":true}
+[declare] fn helper(x)
+[declare] task fetch(url, mode) props: retry=2, on_fail=<lazy>, timeout=1m, fresh=true
+[declare] fn rotate()
+[declare] actor Scout() props: retry=1
+[declare] actor Worker(n) props: 
+[declare] supervisor Crew props: strategy=one_for_one, max_restarts=3, within=1m body=Crew
+[declare] on element_appears(".checkout") params=[event]
+[declare] on dialog() params=[event]
+[declare] on navigation("*/login*", "extra") params=[event]
+first statement
+101
+[task fetch] attempt 1 failed: flaky http://x
+[task fetch] on_fail -> rotated 1
+[task fetch] attempt 2 failed: flaky http://x
+[task fetch] on_fail -> rotated 2
+fetched http://x in slow mode
+["http://x","http://x","http://x"] 2
+[spawn] helper
+105 1
+[spawn] Worker
+worker 7
+[parallel for] opts: limit=2, fail_fast=false
+["got a","got b","got c"]
+[parallel for] opts: 
+["got a","got b","got c",1,2]
+[parallel for] opts: fail_fast=true
+boom 1
+[parallel for] opts: 
+2 item(s) failed: boom 1; boom 2
