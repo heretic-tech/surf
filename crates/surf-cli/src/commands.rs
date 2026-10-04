@@ -123,8 +123,10 @@ pub async fn check(file: PathBuf) -> i32 {
 }
 
 /// `surf doctor`: discovery, display, Xvfb (Linux), a timed headless pipe
-/// launch with the exact flag list, and the shutdown ladder timing.
-pub async fn doctor(chrome: Option<PathBuf>) -> i32 {
+/// launch (the transport smoke test: spawn → first `Browser.getVersion`
+/// answered) with the exact flag list, the shutdown ladder timing, and
+/// with `--detector` the local detector page's results.
+pub async fn doctor(chrome: Option<PathBuf>, detector: bool) -> i32 {
     use surf_browser::discovery::find_chrome;
     use surf_browser::display::has_display;
     use surf_browser::LaunchOptions;
@@ -204,9 +206,12 @@ pub async fn doctor(chrome: Option<PathBuf>) -> i32 {
     };
     let launch_ms = t0.elapsed().as_millis();
     println!(
-        "launch:   ok — {} over --remote-debugging-pipe in {launch_ms} ms (pid {})",
+        "launch:   ok — {} (pid {})",
         launched.product,
         launched.pid()
+    );
+    println!(
+        "transport: pipe (fd 3 / fd 4) — spawn → first Browser.getVersion answered in {launch_ms} ms"
     );
     let roundtrip = Instant::now();
     let version = launched
@@ -216,7 +221,7 @@ pub async fn doctor(chrome: Option<PathBuf>) -> i32 {
         .await;
     match version {
         Ok(v) => println!(
-            "cdp:      Browser.getVersion in {} ms (protocol {}, {})",
+            "cdp:      Browser.getVersion round trip {} ms (protocol {}, {})",
             roundtrip.elapsed().as_millis(),
             v["protocolVersion"].as_str().unwrap_or("?"),
             v["userAgent"].as_str().unwrap_or("?")
@@ -235,7 +240,89 @@ pub async fn doctor(chrome: Option<PathBuf>) -> i32 {
         t1.elapsed().as_millis()
     );
     println!("quiet:    no --enable-automation; only Page.enable is sent per page; never Runtime.enable / DOM.enable");
+    if detector {
+        return run_detector(found.path).await;
+    }
     0
+}
+
+/// The local detector page, embedded so `surf doctor --detector` works
+/// from an installed binary (the e2e suite serves the same file at
+/// `/detector`).
+const DETECTOR_HTML: &str = include_str!("../../../tools/detector/index.html");
+
+/// `surf doctor --detector`: launch a browser the way a script would
+/// (headed when a display exists), load the detector from a temp file,
+/// interact with it (type, hover, click — so a main-world injection by any
+/// action would show), and print every `<li data-check>` result. Exit 1
+/// when a non-informational check fails.
+async fn run_detector(chrome: PathBuf) -> i32 {
+    use surf_browser::{ActionOptions, Browser, LaunchOptions, WaitUntil};
+
+    let opts = LaunchOptions {
+        path: Some(chrome),
+        ..Default::default()
+    };
+    let headless = opts.headless_decision();
+    let mode = if headless { "headless" } else { "headed" };
+    let file = std::env::temp_dir().join(format!("surf-detector-{}.html", std::process::id()));
+    if let Err(e) = std::fs::write(&file, DETECTOR_HTML) {
+        println!("detector: cannot write {}: {e}", file.display());
+        return EXIT_RUNTIME;
+    }
+    let url = format!("file://{}?mode={mode}", file.display());
+    let outcome = async {
+        let browser = Browser::launch(opts).await?;
+        let result = async {
+            let page = browser.sole_page().await?;
+            page.set_timeout(Duration::from_secs(15));
+            page.goto(&url, WaitUntil::Load).await?;
+            page.wait("#done", ActionOptions::default()).await?;
+            page.type_text("#probe", "surf doctor", ActionOptions::default())
+                .await?;
+            page.hover("#recheck", ActionOptions::default()).await?;
+            page.click("#recheck", ActionOptions::default()).await?;
+            page.wait("#done[data-round='2']", ActionOptions::default())
+                .await?;
+            let mut rows = Vec::new();
+            for li in page.all("li[data-check]").await? {
+                rows.push((
+                    li.attr("data-check").await?.unwrap_or_default(),
+                    li.attr("data-status").await?.unwrap_or_default(),
+                    li.attr("data-detail").await?.unwrap_or_default(),
+                ));
+            }
+            let summary = page.text("#summary", ActionOptions::default()).await?;
+            Ok::<_, surf_browser::BrowserError>((rows, summary))
+        }
+        .await;
+        let _ = browser.close().await;
+        result
+    }
+    .await;
+    let _ = std::fs::remove_file(&file);
+    match outcome {
+        Ok((rows, summary)) => {
+            println!("detector: {mode} — {summary}");
+            let width = rows.iter().map(|r| r.0.len()).max().unwrap_or(0);
+            let mut failed = 0;
+            for (name, status, detail) in &rows {
+                println!("  {status:<4} {name:<width$}  {detail}");
+                if status == "FAIL" {
+                    failed += 1;
+                }
+            }
+            if failed > 0 {
+                EXIT_RUNTIME
+            } else {
+                0
+            }
+        }
+        Err(e) => {
+            println!("detector: FAILED: {e}");
+            EXIT_RUNTIME
+        }
+    }
 }
 
 /// `surf repl`: one chunk at a time on a single runtime. A line ending in
