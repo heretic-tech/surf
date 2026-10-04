@@ -123,6 +123,69 @@ async fn goto_eval_readers_and_navigation() {
     b.close().await.unwrap();
 }
 
+/// `click` arms the navigation subscriptions before it runs, so a
+/// `wait_for_navigation` issued after a navigation has *already*
+/// committed and loaded (same-origin, local server, plus a deliberate
+/// pause) still succeeds instead of waiting for a navigation that will
+/// never come. Without a preceding action the wait only sees later
+/// navigations.
+#[tokio::test]
+async fn wait_for_navigation_sees_navigation_committed_before_the_call() {
+    let Some(b) = browser("wait_for_navigation_sees_navigation_committed_before_the_call").await
+    else {
+        return;
+    };
+    let fx = Fixture::start().await;
+    let page = b.sole_page().await.expect("sole page");
+    page.set_timeout(Duration::from_secs(2));
+    page.goto(&fx.url("/forms.html"), WaitUntil::Load)
+        .await
+        .expect("goto");
+
+    // click → navigation completes long before wait_for_navigation runs.
+    page.click("#link", opts()).await.expect("click link");
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(page.url().await.unwrap().ends_with("/nav.html"));
+    let started = Instant::now();
+    page.wait_for_navigation(WaitUntil::Load)
+        .await
+        .expect("wait_for_navigation after an already-finished navigation");
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "should return from buffered events, took {:?}",
+        started.elapsed()
+    );
+    assert_eq!(page.title().await.unwrap(), "Nav fixture");
+
+    // The armed subscriptions are consumed: a second wait with no action
+    // in between times out (nothing navigates).
+    let err = page
+        .wait_for_navigation(WaitUntil::Commit)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, BrowserError::Timeout { .. }),
+        "expected Timeout, got {err}"
+    );
+
+    // `commit` after an already-committed navigation returns at once.
+    page.click("#back-link", opts())
+        .await
+        .expect("click back-link");
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    page.wait_for_navigation(WaitUntil::Commit).await.unwrap();
+    assert!(page.url().await.unwrap().ends_with("/forms.html"));
+
+    // `press` arms too (Enter on a focused link navigates).
+    page.focus("#link", opts()).await.unwrap();
+    page.press("Enter").await.unwrap();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    page.wait_for_navigation(WaitUntil::Load).await.unwrap();
+    assert_eq!(page.title().await.unwrap(), "Nav fixture");
+
+    b.close().await.unwrap();
+}
+
 #[tokio::test]
 async fn form_actions() {
     let Some(b) = browser("form_actions").await else {

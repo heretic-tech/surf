@@ -1,7 +1,35 @@
 //! Small helpers: base64 decoding (screenshots / PDFs arrive base64-encoded
-//! over JSON) and random identifiers for isolated-world helper names.
+//! over JSON), base64 encoding (`Fetch.fulfillRequest` bodies), and random
+//! identifiers for isolated-world helper names.
 
 use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Encode bytes as standard base64 with padding.
+pub fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        out.push(TABLE[(n >> 18) as usize & 63] as char);
+        out.push(TABLE[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
 
 /// Decode standard (or URL-safe) base64, ignoring whitespace and padding.
 pub fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
@@ -86,6 +114,16 @@ mod tests {
             [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n']
         );
         assert!(base64_decode("Zm9v!").is_err());
+    }
+
+    #[test]
+    fn base64_encode_matches_decode() {
+        for s in ["", "f", "fo", "foo", "foob", "fooba", "foobar"] {
+            let enc = base64_encode(s.as_bytes());
+            assert_eq!(base64_decode(&enc).unwrap(), s.as_bytes(), "{s}");
+        }
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+        assert_eq!(base64_encode(b"f"), "Zg==");
     }
 
     #[test]

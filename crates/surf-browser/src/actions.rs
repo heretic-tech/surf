@@ -236,6 +236,9 @@ impl Page {
     ) -> Result<(World, String, f64, f64), BrowserError> {
         let started = Instant::now();
         let (deadline, _) = self.deadline(opts);
+        // `wait_navigation()` after this action must notice a navigation
+        // that commits before it is called.
+        self.mark_action();
         loop {
             let world = self.world().await?;
             let step = async {
@@ -563,6 +566,7 @@ impl Page {
     /// Press a key (`Enter`, `Ctrl+a`, …) on whatever has focus.
     pub async fn press(&self, key: &str) -> Result<(), BrowserError> {
         let press = input::parse_combo(key)?;
+        self.mark_action();
         input::press_key(&self.session()?, &press).await
     }
 
@@ -867,7 +871,7 @@ impl Page {
     /// Wait until the URL matches `pattern`: a glob (`*` wildcard; a bare
     /// string must match the whole URL) or a regex with the `re:` prefix.
     pub async fn wait_url(&self, pattern: &str, opts: ActionOptions) -> Result<(), BrowserError> {
-        let matcher = UrlMatcher::parse(pattern)?;
+        let matcher = UrlPattern::parse(pattern)?;
         let started = Instant::now();
         let (deadline, _) = self.deadline(&opts);
         loop {
@@ -897,33 +901,6 @@ impl Page {
     /// Plain sleep (`wait(2s)`).
     pub async fn wait_for(&self, d: Duration) {
         tokio::time::sleep(d).await;
-    }
-}
-
-/// `wait_url` pattern: glob or `re:` regex.
-enum UrlMatcher {
-    Glob(UrlPattern),
-    Regex(regex::Regex),
-}
-
-impl UrlMatcher {
-    fn parse(p: &str) -> Result<UrlMatcher, BrowserError> {
-        if let Some(re) = p.strip_prefix("re:") {
-            return regex::Regex::new(re).map(UrlMatcher::Regex).map_err(|e| {
-                BrowserError::Config {
-                    what: "wait_url pattern".into(),
-                    reason: e.to_string(),
-                }
-            });
-        }
-        Ok(UrlMatcher::Glob(UrlPattern(p.to_owned())))
-    }
-
-    fn matches(&self, url: &str) -> bool {
-        match self {
-            UrlMatcher::Glob(g) => g.matches(url),
-            UrlMatcher::Regex(r) => r.is_match(url),
-        }
     }
 }
 
@@ -1224,15 +1201,15 @@ mod tests {
 
     #[test]
     fn url_matchers() {
-        assert!(UrlMatcher::parse("*/done")
+        assert!(UrlPattern::parse("*/done")
             .unwrap()
             .matches("http://x/a/done"));
-        assert!(!UrlMatcher::parse("*/done")
+        assert!(!UrlPattern::parse("*/done")
             .unwrap()
             .matches("http://x/a/done?x"));
-        assert!(UrlMatcher::parse("re:done\\?")
+        assert!(UrlPattern::parse("re:done\\?")
             .unwrap()
             .matches("http://x/done?x"));
-        assert!(UrlMatcher::parse("re:(").is_err());
+        assert!(UrlPattern::parse("re:(").is_err());
     }
 }

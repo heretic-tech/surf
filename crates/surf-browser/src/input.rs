@@ -270,6 +270,11 @@ fn commands_for(press: &KeyPress) -> Option<Vec<String>> {
 }
 
 /// `keyDown` (or `rawKeyDown` when the key produces no text) + `keyUp`.
+///
+/// Only `windowsVirtualKeyCode` is sent, never `nativeVirtualKeyCode`: on
+/// macOS Chrome reads the native code as a Mac virtual key (65 = keypad
+/// `.`), and `Ctrl+a` then showed up in the page as a storm of repeated
+/// `.` keydowns with `ctrlKey` set.
 pub async fn press_key(session: &Session, press: &KeyPress) -> Result<(), BrowserError> {
     let k = &press.key;
     // With Ctrl/Alt/Meta held the key does not insert its text.
@@ -289,7 +294,6 @@ pub async fn press_key(session: &Session, press: &KeyPress) -> Result<(), Browse
             key: Some(k.key.clone()),
             code: Some(k.code.into()),
             windows_virtual_key_code: Some(k.key_code),
-            native_virtual_key_code: Some(k.key_code),
             commands: commands_for(press),
             ..Default::default()
         })
@@ -301,7 +305,6 @@ pub async fn press_key(session: &Session, press: &KeyPress) -> Result<(), Browse
             key: Some(k.key.clone()),
             code: Some(k.code.into()),
             windows_virtual_key_code: Some(k.key_code),
-            native_virtual_key_code: Some(k.key_code),
             ..Default::default()
         })
         .await?;

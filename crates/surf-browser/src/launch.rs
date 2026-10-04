@@ -105,6 +105,9 @@ pub struct LaunchOptions {
     pub timeout: Duration,
     /// `chrome` (default) or `apostate` (reserved; clear "not yet" error).
     pub engine: String,
+    /// `downloads: dir` — allow downloads into this directory
+    /// (`Browser.setDownloadBehavior`) and track them for `wait_download()`.
+    pub downloads: Option<PathBuf>,
 }
 
 impl Default for LaunchOptions {
@@ -121,6 +124,7 @@ impl Default for LaunchOptions {
             flags: Vec::new(),
             timeout: Duration::from_secs(30),
             engine: "chrome".into(),
+            downloads: None,
         }
     }
 }

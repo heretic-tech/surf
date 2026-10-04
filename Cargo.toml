@@ -50,6 +50,7 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Syste
 # dev
 insta = { version = "1.49.0", features = ["yaml"] }
 axum = "0.8.9"
+similar = "2.7.0"
 
 [profile.release]
 lto = "thin"

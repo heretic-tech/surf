@@ -17,7 +17,7 @@
 use crate::cookies::Cookie;
 use crate::error::BrowserError;
 use crate::launch::Credentials;
-use crate::network::ProxyAuth;
+use crate::network::{FetchHub, Interception, NetworkHooks, UrlPattern};
 use crate::util::base64_decode;
 use crate::world::{context_lost, World};
 use serde_json::Value;
@@ -29,7 +29,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use surf_cdp::protocol::{emulation, page, storage, target};
-use surf_cdp::{event, DomainGuard, Session};
+use surf_cdp::{event, DomainGuard, Event, Session};
+use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 /// Slack added to the page timeout for the per-call CDP timeout, so a
@@ -115,6 +116,9 @@ pub enum DialogPolicy {
     Dismiss,
     /// Accept with this text (prompts).
     AcceptWith(String),
+    /// Leave the dialog open: an `on dialog:` handler answers it through
+    /// [`Page::answer_dialog`].
+    Defer,
 }
 
 /// A dialog the page opened (recorded for `page.dialogs()`).
@@ -142,12 +146,26 @@ struct Shared {
     last_url: Mutex<String>,
 }
 
+/// Navigation subscriptions taken at the start of an action that may
+/// navigate (`click`, `press`, …). Broadcast receivers buffer from the
+/// moment they are created, so a `wait_for_navigation` that follows the
+/// action still sees a navigation that committed before it was called.
+struct Armed {
+    /// `nav_epoch` when the action started.
+    epoch: u64,
+    lifecycle: broadcast::Receiver<Event>,
+    navigated: broadcast::Receiver<Event>,
+}
+
 /// Everything that belongs to one backing and is torn down on rebind.
 struct Attached {
     backing: Backing,
     _page_guard: DomainGuard,
     events: JoinHandle<()>,
-    _proxy_auth: Option<ProxyAuth>,
+    /// The one owner of `Fetch` on this session (proxy auth + intercept).
+    fetch: Rc<FetchHub>,
+    /// `Network` held while `blocked` is non-empty.
+    block_guard: Option<DomainGuard>,
 }
 
 impl Drop for Attached {
@@ -190,6 +208,10 @@ pub struct PageInner {
     pub timeout: Cell<Duration>,
     /// Proxy credentials to re-install on rebind (same context kind).
     credentials: RefCell<Option<Credentials>>,
+    /// `block([...])` patterns (Chrome dialect), re-applied on rebind.
+    blocked: RefCell<Vec<String>>,
+    /// Subscriptions taken by the last [`mark_action`](Page::mark_action).
+    armed: RefCell<Option<Armed>>,
 }
 
 /// A stable handle to a tab. Cheap to clone; all clones share state.
@@ -224,6 +246,8 @@ impl Page {
             name: RefCell::new(None),
             timeout: Cell::new(timeout),
             credentials: RefCell::new(credentials),
+            blocked: RefCell::new(Vec::new()),
+            armed: RefCell::new(None),
         }));
         page.install(backing).await?;
         Ok(page)
@@ -239,9 +263,19 @@ impl Page {
             .send(page::SetLifecycleEventsEnabled { enabled: true })
             .await?;
         let credentials = self.0.credentials.borrow().clone();
-        let proxy_auth = match credentials {
-            Some(c) => Some(ProxyAuth::install(session.clone(), c).await?),
-            None => None,
+        let fetch = Rc::new(FetchHub::install(session.clone(), credentials).await?);
+        let blocked = self.0.blocked.borrow().clone();
+        let block_guard = if blocked.is_empty() {
+            None
+        } else {
+            let guard = session.enable_domain("Network").await?;
+            session
+                .call_raw(
+                    "Network.setBlockedURLs",
+                    serde_json::json!({ "urls": blocked }),
+                )
+                .await?;
+            Some(guard)
         };
         let events = tokio::spawn(page_events(
             session.clone(),
@@ -249,11 +283,13 @@ impl Page {
             backing.frame_id.clone(),
         ));
         *self.0.world.borrow_mut() = None;
+        self.0.armed.borrow_mut().take();
         *self.0.attached.borrow_mut() = Some(Attached {
             backing,
             _page_guard: page_guard,
             events,
-            _proxy_auth: proxy_auth,
+            fetch,
+            block_guard,
         });
         Ok(())
     }
@@ -437,16 +473,54 @@ impl Page {
         }
     }
 
+    /// Subscribe to the navigation events *now*, before an action that
+    /// may navigate runs, so that a `wait_for_navigation` issued after the
+    /// action still sees a navigation that committed in between. Every
+    /// action that can trigger a navigation (`click`, `press`, …) calls
+    /// this first; the subscriptions are replaced by the next action and
+    /// consumed by [`wait_for_navigation`](Self::wait_for_navigation).
+    pub(crate) fn mark_action(&self) {
+        let Some(backing) = self.backing() else {
+            return;
+        };
+        let armed = Armed {
+            epoch: self.0.shared.nav_epoch.load(Ordering::SeqCst),
+            lifecycle: backing.session.events("Page.lifecycleEvent"),
+            navigated: backing.session.events("Page.frameNavigated"),
+        };
+        *self.0.armed.borrow_mut() = Some(armed);
+    }
+
     /// Wait for the next main-frame navigation to commit and reach
     /// `wait_until` (after a click that navigates, `back`, `reload`, …).
-    /// Call it *after* triggering the navigation; events are buffered from
-    /// the moment this page's event channels exist, so a navigation that
-    /// committed just before is still seen.
+    /// Call it *after* triggering the navigation. Actions that can
+    /// navigate subscribe to the navigation events before they run
+    /// ([`mark_action`](Self::mark_action)); those buffered receivers are
+    /// used here, so a navigation that committed between the action and
+    /// this call is still seen. Without a preceding action the
+    /// subscription is taken now and only a later navigation counts.
     pub async fn wait_for_navigation(&self, wait_until: WaitUntil) -> Result<(), BrowserError> {
         let session = self.session()?;
         let frame_id = self.frame_id()?;
-        let lifecycle = session.events("Page.lifecycleEvent");
-        let navigated = session.events("Page.frameNavigated");
+        let armed = self.0.armed.borrow_mut().take();
+        let (lifecycle, navigated) = match armed {
+            Some(Armed {
+                epoch,
+                lifecycle,
+                navigated,
+            }) => {
+                let now = self.0.shared.nav_epoch.load(Ordering::SeqCst);
+                if now > epoch && wait_until.lifecycle_name().is_none() {
+                    // Committed already and `commit` is all that was asked.
+                    return Ok(());
+                }
+                (lifecycle, navigated)
+            }
+            None => (
+                session.events("Page.lifecycleEvent"),
+                session.events("Page.frameNavigated"),
+            ),
+        };
         self.await_navigation(lifecycle, navigated, &frame_id, wait_until)
             .await
     }
@@ -578,6 +652,123 @@ impl Page {
     /// Dialogs the page has opened so far (oldest first).
     pub fn dialogs(&self) -> Vec<Dialog> {
         self.0.shared.dialogs.lock().expect("dialogs").clone()
+    }
+
+    /// `Page.handleJavaScriptDialog` for a dialog left open by
+    /// [`DialogPolicy::Defer`].
+    pub async fn answer_dialog(
+        &self,
+        accept: bool,
+        prompt_text: Option<String>,
+    ) -> Result<(), BrowserError> {
+        self.session()?
+            .send(page::HandleJavaScriptDialog {
+                accept,
+                prompt_text,
+            })
+            .await?;
+        Ok(())
+    }
+
+    // ───────────────────────── network ─────────────────────────
+
+    /// Enable `Network` on this page's session for `on request` /
+    /// `on response` hooks; the domain is released when the returned
+    /// handle is dropped (unless `block` still needs it).
+    pub async fn network_hooks(&self) -> Result<NetworkHooks, BrowserError> {
+        NetworkHooks::install(self.session()?).await
+    }
+
+    /// Route requests matching `patterns` to an `intercept(pattern):`
+    /// handler ([`Interception`]); `Fetch` is shared with proxy
+    /// authentication. Dropping the handle stops intercepting.
+    pub async fn intercept(&self, patterns: Vec<UrlPattern>) -> Result<Interception, BrowserError> {
+        let hub = self
+            .0
+            .attached
+            .borrow()
+            .as_ref()
+            .map(|a| a.fetch.clone())
+            .ok_or(BrowserError::PageClosed {
+                index: self.0.index,
+            })?;
+        hub.intercept(patterns).await
+    }
+
+    /// `block([...])`: `Network.setBlockedURLs` with Chrome's `*`
+    /// patterns (unanchored). This needs `Network` enabled, which is held
+    /// while the list is non-empty and released by `block([])`. The list
+    /// survives a rebind.
+    pub async fn set_blocked_urls(&self, patterns: Vec<String>) -> Result<(), BrowserError> {
+        let session = self.session()?;
+        *self.0.blocked.borrow_mut() = patterns.clone();
+        if patterns.is_empty() {
+            let guard = self
+                .0
+                .attached
+                .borrow_mut()
+                .as_mut()
+                .and_then(|a| a.block_guard.take());
+            if guard.is_some() {
+                session
+                    .call_raw("Network.setBlockedURLs", serde_json::json!({ "urls": [] }))
+                    .await?;
+            }
+            return Ok(());
+        }
+        let has_guard = self
+            .0
+            .attached
+            .borrow()
+            .as_ref()
+            .is_some_and(|a| a.block_guard.is_some());
+        if !has_guard {
+            let guard = session.enable_domain("Network").await?;
+            if let Some(a) = self.0.attached.borrow_mut().as_mut() {
+                a.block_guard = Some(guard);
+            }
+        }
+        session
+            .call_raw(
+                "Network.setBlockedURLs",
+                serde_json::json!({ "urls": patterns }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// The current `block([...])` list.
+    pub fn blocked_urls(&self) -> Vec<String> {
+        self.0.blocked.borrow().clone()
+    }
+
+    // ───────────────────────── storage ─────────────────────────
+
+    /// `localStorage` of the current origin as a map.
+    pub async fn local_storage(&self) -> Result<serde_json::Map<String, Value>, BrowserError> {
+        let v = self
+            .eval("(() => { const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); o[k] = localStorage.getItem(k); } return o; })()")
+            .await?;
+        Ok(v.as_object().cloned().unwrap_or_default())
+    }
+
+    /// `localStorage.setItem` for every entry.
+    pub async fn set_local_storage(
+        &self,
+        entries: serde_json::Map<String, Value>,
+    ) -> Result<(), BrowserError> {
+        self.eval_fn(
+            "function(o) { for (const [k, v] of Object.entries(o)) localStorage.setItem(k, v === null || v === undefined ? '' : (typeof v === 'string' ? v : JSON.stringify(v))); }",
+            vec![Value::Object(entries)],
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// `localStorage.clear()`.
+    pub async fn clear_local_storage(&self) -> Result<(), BrowserError> {
+        self.eval("(localStorage.clear(), null)").await?;
+        Ok(())
     }
 
     // ───────────────────────── capture ─────────────────────────
@@ -768,6 +959,7 @@ impl Page {
     /// gone or going away).
     pub(crate) fn forget(&self) {
         self.0.world.borrow_mut().take();
+        self.0.armed.borrow_mut().take();
         self.0.attached.borrow_mut().take();
     }
 
@@ -777,6 +969,7 @@ impl Page {
             return Ok(());
         };
         self.0.world.borrow_mut().take();
+        self.0.armed.borrow_mut().take();
         let backing = attached.backing.clone();
         drop(attached);
         let root = backing.session.connection().root();
@@ -833,6 +1026,10 @@ async fn page_events(session: Session, shared: Arc<Shared>, frame_id: String) {
                 let policy = shared.dialog_policy.lock().expect("dialog policy").clone();
                 tracing::debug!("{} dialog {:?}: {policy:?}", dialog.kind, dialog.message);
                 let (accept, prompt_text) = match policy {
+                    DialogPolicy::Defer => {
+                        shared.dialogs.lock().expect("dialogs").push(dialog);
+                        continue;
+                    }
                     DialogPolicy::Accept if dialog.kind == "prompt" => {
                         (true, Some(dialog.default_prompt.clone().unwrap_or_default()))
                     }

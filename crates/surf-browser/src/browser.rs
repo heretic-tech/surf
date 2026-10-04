@@ -19,9 +19,11 @@
 
 use crate::error::BrowserError;
 use crate::launch::{launch, CdpMode, Credentials, LaunchOptions, Launched, ProxySpec};
+use crate::network::DownloadTracker;
 use crate::page::{Backing, Migration, Page};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -78,6 +80,8 @@ pub struct Browser {
     contexts: RefCell<HashMap<String, String>>,
     /// Proxy URL per private context: context id → proxy.
     context_proxies: RefCell<HashMap<String, String>>,
+    /// `downloads: dir` tracker (`None` → downloads are left to Chrome).
+    downloads: Option<DownloadTracker>,
     next_index: Cell<usize>,
     closed: Cell<bool>,
 }
@@ -103,6 +107,21 @@ impl Browser {
         let launched = launch(cfg).await?;
         let conn = launched.connection.clone();
         let credentials = launched.proxy_credentials.clone();
+        let downloads = match &opts.downloads {
+            Some(dir) => {
+                let root = conn
+                    .root()
+                    .with_timeout(Some(opts.timeout + Duration::from_secs(5)));
+                match DownloadTracker::install(root, dir).await {
+                    Ok(t) => Some(t),
+                    Err(e) => {
+                        launched.close().await;
+                        return Err(e);
+                    }
+                }
+            }
+            None => None,
+        };
         Ok(Rc::new(Browser {
             opts,
             origin: RefCell::new(Some(Origin::Launched(Box::new(launched)))),
@@ -112,6 +131,7 @@ impl Browser {
             credentials,
             contexts: RefCell::new(HashMap::new()),
             context_proxies: RefCell::new(HashMap::new()),
+            downloads,
             next_index: Cell::new(1),
             closed: Cell::new(false),
         }))
@@ -136,6 +156,10 @@ impl Browser {
             .map(ProxySpec::parse)
             .transpose()?
             .and_then(|p| p.credentials);
+        let downloads = match &opts.downloads {
+            Some(dir) => Some(DownloadTracker::install(root.clone(), dir).await?),
+            None => None,
+        };
         Ok(Rc::new(Browser {
             opts,
             origin: RefCell::new(Some(Origin::Attached {
@@ -147,6 +171,7 @@ impl Browser {
             credentials,
             contexts: RefCell::new(HashMap::new()),
             context_proxies: RefCell::new(HashMap::new()),
+            downloads,
             next_index: Cell::new(1),
             closed: Cell::new(false),
         }))
@@ -182,6 +207,65 @@ impl Browser {
         }
     }
 
+    // ───────────────────────── downloads ─────────────────────────
+
+    /// The download directory (`downloads: dir`), if downloads are tracked.
+    pub fn download_dir(&self) -> Option<PathBuf> {
+        self.downloads.as_ref().map(|t| t.dir().to_path_buf())
+    }
+
+    /// Wait for the next download started by `page` to finish and return
+    /// its path (the file is renamed to its suggested name). Needs
+    /// `downloads: dir`.
+    pub async fn wait_download(
+        &self,
+        page: &Page,
+        timeout: Duration,
+    ) -> Result<PathBuf, BrowserError> {
+        let tracker = self
+            .downloads
+            .as_ref()
+            .ok_or_else(|| BrowserError::Config {
+                what: "downloads".into(),
+                reason: "wait_download() needs `downloads: \"./dir\"` in the browser: block".into(),
+            })?;
+        let frame_id = page.frame_id()?;
+        tracker.wait(&frame_id, timeout).await
+    }
+
+    /// Every download seen so far (needs `downloads: dir`).
+    pub fn downloads(&self) -> Vec<crate::network::Download> {
+        self.downloads
+            .as_ref()
+            .map(DownloadTracker::downloads)
+            .unwrap_or_default()
+    }
+
+    /// `Target.createBrowserContext` plus the download behaviour when
+    /// downloads are tracked.
+    async fn create_context(&self, proxy_server: Option<String>) -> Result<String, BrowserError> {
+        let root = self.root();
+        let ctx = root
+            .send(target::CreateBrowserContext {
+                proxy_server,
+                dispose_on_detach: Some(true),
+                ..Default::default()
+            })
+            .await?
+            .browser_context_id;
+        if let Some(t) = &self.downloads {
+            if let Err(e) = t.apply_to_context(&root, &ctx).await {
+                let _ = root
+                    .send(target::DisposeBrowserContext {
+                        browser_context_id: ctx,
+                    })
+                    .await;
+                return Err(e);
+            }
+        }
+        Ok(ctx)
+    }
+
     // ───────────────────────── pages ─────────────────────────
 
     /// Create a new page (tab); see [`NewPageOptions`].
@@ -193,24 +277,10 @@ impl Browser {
         let (context_id, credentials) = match (&opts.proxy, opts.isolated) {
             (Some(proxy), _) => {
                 let spec = ProxySpec::parse(proxy)?;
-                let ctx = root
-                    .send(target::CreateBrowserContext {
-                        proxy_server: Some(spec.server_arg()),
-                        dispose_on_detach: Some(true),
-                        ..Default::default()
-                    })
-                    .await?;
-                (Some(ctx.browser_context_id), spec.credentials)
+                let ctx = self.create_context(Some(spec.server_arg())).await?;
+                (Some(ctx), spec.credentials)
             }
-            (None, true) => {
-                let ctx = root
-                    .send(target::CreateBrowserContext {
-                        dispose_on_detach: Some(true),
-                        ..Default::default()
-                    })
-                    .await?;
-                (Some(ctx.browser_context_id), None)
-            }
+            (None, true) => (Some(self.create_context(None).await?), None),
             (None, false) => (None, self.credentials.clone()),
         };
         let backing = match self.create_backing(context_id.clone()).await {
@@ -405,13 +475,8 @@ impl Browser {
         let new_context = !matches!(target, RebindTarget::SameContext);
         let context_id = if new_context {
             Some(
-                root.send(target::CreateBrowserContext {
-                    proxy_server: spec.as_ref().map(ProxySpec::server_arg),
-                    dispose_on_detach: Some(true),
-                    ..Default::default()
-                })
-                .await?
-                .browser_context_id,
+                self.create_context(spec.as_ref().map(ProxySpec::server_arg))
+                    .await?,
             )
         } else {
             old.browser_context_id.clone()
