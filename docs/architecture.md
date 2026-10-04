@@ -74,7 +74,7 @@ surf-syntax ──► surf-vm ──► surf-runtime ──► surf-browser ─�
 
 | rule | enforced in |
 |------|-------------|
-| never `Runtime.enable`, never `DOM.enable` | `surf_cdp::FORBIDDEN_METHODS` (debug assert in `Session::call_raw`), `Session::enable_domain` rejects `Runtime`/`DOM`; `surf-browser` only creates isolated worlds |
+| never `Runtime.enable`, never `DOM.enable` | `surf_cdp::FORBIDDEN_METHODS` (refused by `Session::call_raw` in every build; no typed command is generated for them), `Session::enable_domain` rejects `Runtime`/`DOM`; `surf-browser` only creates isolated worlds |
 | exact launch flags, no `--enable-automation`, no `--disable-*` | `surf_browser::launch::LaunchOptions::args` (unit-tested) |
 | only `Page.enable` by default; `Network`/`Fetch` only while a hook exists | `surf_cdp::DomainGuard` ref-counting, owned by `surf_browser::network` hooks |
 | pipe by default, no listening port unless `cdp: 9222` | `surf_browser::launch::CdpMode` |
@@ -127,9 +127,115 @@ pub enum CdpError {
 pub trait Command: Serialize { const METHOD: &'static str; type Response: DeserializeOwned; }
 ```
 
-`Connection::root()` / `attach()` take `self: &Arc<Self>` in the skeleton
-(they must hand the session an `Arc`); call them through the `Arc` returned
-by `new`.
+`Connection::root()` / `attach()` take `self: &Arc<Self>` (they hand the
+session an `Arc`); call them through the `Arc` returned by `new`. Additive
+helpers beyond the contract: `Connection::session(id)` (wrap a `sessionId`
+learned from `Target.attachedToTarget`), `close()`, `wait_closed()`,
+`Session::with_timeout(Option<Duration>)`, `Session::domain_refcount`,
+`Event::parse::<E: ProtocolEvent>()`, `surf_cdp::event::next(&mut rx)`
+(drains a receiver, logging lag).
+
+#### Transport and session model
+
+```
+  Session (root)      Session ("S1")       Session ("S2")        ← cheap clones, Arc<Connection>
+      │ call(method, params)   │ events("Page.loadEventFired")
+      ▼                        ▼
+  ┌──────────────────────── Connection ────────────────────────┐
+  │ next_id: AtomicU64       pending: id → oneshot<RawValue>    │
+  │ routes: (sessionId?, method) → broadcast::Sender<Event>(1024)│
+  │ domain_counts: (sessionId?, domain) → live DomainGuards     │
+  └──────────────┬──────────────────────────────▲──────────────┘
+   outgoing mpsc │                              │ dispatch()
+                 ▼                              │
+          ┌──── driver task (one per connection) ────┐
+          │ select! { outgoing.recv() → transport.send │
+          │           transport.recv() → dispatch }    │   recv must be cancel-safe
+          └───────────────────┬──────────────────────┘
+                              ▼
+                   Box<dyn Transport>   pipe (fd 3 / fd 4)  |  websocket
+```
+
+* **Ids** are connection-wide and monotonic. A response is matched by `id`
+  only; the `sessionId` echoed on responses is ignored.
+* **Events** are routed by `(sessionId, method)`; `None` is the root. Each
+  `(session, method)` has one `broadcast` channel of capacity 1024 created
+  on first `events()`; `events("*")` is a per-session catch-all. When a
+  channel is full the sender logs `warn!` (a slow subscriber will see
+  `Lagged(n)`); `surf_cdp::event::next` logs and skips the lag. Channels of
+  a session are dropped on `Session::detach()` or when Chrome reports
+  `Target.detachedFromTarget` for it, so receivers end with `Closed`.
+* **Sessions**: `attach(target_id)` sends
+  `Target.attachToTarget{targetId, flatten:true}`; every later command on
+  that `Session` carries `"sessionId"`. `detach()` sends
+  `Target.detachFromTarget{sessionId}` on the root.
+* **Domains**: `enable_domain("Page")` returns a `DomainGuard`. The first
+  guard per `(session, domain)` sends `Page.enable`; dropping the last
+  spawns a best-effort `Page.disable` (re-checked under a lock so a guard
+  taken in between cancels the disable). `Runtime` / `DOM` are refused.
+* **Lifetime**: the driver holds a `Weak<Connection>`. Dropping the last
+  `Session`/`Arc<Connection>` (or `close()`) ends the driver, which drops
+  the transport — closing the pipe / websocket. Transport EOF or error
+  marks the connection closed: pending calls fail with `CdpError::Closed`,
+  every event channel closes, `wait_closed()` resolves.
+* **Timeouts**: none by default; `with_timeout` yields a handle whose calls
+  fail with `CdpError::Timeout{method}`. The pending slot is removed when a
+  caller gives up, so a late answer is ignored.
+* **Tracing**: `set_trace(true)` or `SURF_TRACE_CDP=1` logs every frame at
+  `debug` under target `surf_cdp::trace`, `→` sent / `←` received,
+  truncated at 4 KiB.
+
+#### Pipe framing (`--remote-debugging-pipe`)
+
+Two anonymous pipes. Chrome reads commands from **fd 3** and writes
+responses/events to **fd 4**:
+
+```
+  parent ──pipe A──▶ child fd 3      parent write end  = PipeTransport.writer
+  parent ◀──pipe B── child fd 4      parent read end   = PipeTransport.reader
+```
+
+Each message is the UTF-8 JSON text followed by exactly one `0x00` byte
+(ASCIIZ framing); there is no length prefix and JSON never contains a raw
+NUL, so the reader scans for `0x00`:
+
+```
+  7B 22 69 64 22 3A 31 2C 22 6D 65 74 68 6F 64 22 3A ... 7D 00 7B 22 69 64 22 3A 32 ...
+  {  "  i  d  "  :  1  ,  "  m  e  t  h  o  d  "  :     }  \0 {  "  i  d  "  :  2
+```
+
+`FrameDecoder` buffers across reads, so one `read` may yield zero, one or
+several frames and a frame may span many reads. `pipe::create_pair()`
+returns `(PipeTransport, ChildFds)`; on unix both child fds are `CLOEXEC`
+and blocking — the launcher `dup2`s them onto 3 and 4 in `pre_exec`
+(`dup2` clears `CLOEXEC` on the new descriptor only) and drops `ChildFds`
+after `spawn` so the parent sees EOF when Chrome exits. On Windows the two
+handles are made inheritable and passed as
+`--remote-debugging-io-pipes=<read>,<write>` (decimal handle values);
+parent ends are `tokio::fs::File`s (anonymous pipes have no overlapped IO).
+`--remote-debugging-pipe=cbor` exists and is not used (TASKS.md).
+
+#### WebSocket (`cdp: 9222`, `cdp: "ws://…"`, `pool: "wss://…"`)
+
+One CDP message per text frame; message/frame size limits are lifted
+(screenshots). `transport::tcp::connect(host, port)` does one raw
+`GET /json/version` (no HTTP client dependency; `Host` must be an IP or
+`localhost` or Chrome refuses), reads `webSocketDebuggerUrl` and connects.
+A peer that disappears without the closing handshake is treated as EOF.
+
+#### Codegen (`crates/surf-cdp/build.rs`)
+
+Runs at build time over `protocol/*.json` for the allow-list `Target, Page,
+Runtime, DOM, Input, Network, Fetch, Emulation, Browser, Storage, IO,
+Security` and writes `$OUT_DIR/protocol.rs`, included as
+`surf_cdp::protocol::{target, page, …}`. `Domain.fooBar` →
+`domain::FooBar` (`Serialize`, `impl Command { METHOD, Response }`) +
+`domain::FooBarResponse` (`Deserialize`; `Empty` when nothing is returned);
+events → `domain::FooBarEvent` (`impl ProtocolEvent { METHOD }`). Named
+string enums become Rust enums with a `#[serde(other)] Unrecognized`
+variant; inline enums are `String`; `any` / opaque objects / refs outside
+the allow-list are `serde_json::Value`; self-referential structs are
+`Box`ed. `Runtime.enable` and `DOM.enable` are skipped.
 
 ### surf-vm (single-threaded; wasm32-clean; `futures::future::LocalBoxFuture`)
 
