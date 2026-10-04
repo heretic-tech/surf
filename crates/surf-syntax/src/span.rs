@@ -42,6 +42,39 @@ impl Span {
     pub fn range(&self) -> std::ops::Range<usize> {
         self.start as usize..self.end as usize
     }
+
+    /// Empty span at `offset`.
+    pub const fn at(offset: u32) -> Self {
+        Self {
+            start: offset,
+            end: offset,
+        }
+    }
+
+    /// 1-based `(line, column)` of the span start inside `source`
+    /// (column counts characters, not bytes).
+    pub fn line_col(&self, source: &str) -> (usize, usize) {
+        line_col(source, self.start as usize)
+    }
+
+    /// The source text covered by this span (clamped to the source length).
+    pub fn slice<'a>(&self, source: &'a str) -> &'a str {
+        let start = (self.start as usize).min(source.len());
+        let end = (self.end as usize).clamp(start, source.len());
+        &source[start..end]
+    }
+}
+
+/// 1-based `(line, column)` of byte `offset` inside `source`.
+///
+/// Offsets past the end report the position just after the last character.
+pub fn line_col(source: &str, offset: usize) -> (usize, usize) {
+    let offset = offset.min(source.len());
+    let before = &source[..offset];
+    let line = before.matches('\n').count() + 1;
+    let line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let col = before[line_start..].chars().count() + 1;
+    (line, col)
 }
 
 /// A value with its source span.
