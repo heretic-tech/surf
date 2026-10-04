@@ -18,6 +18,12 @@ path = "src/main.rs"
 name = "e2e"
 path = "../../tests/e2e/main.rs"
 
+# Performance gates on the built binary; budgets assert in release only:
+# `cargo test --release --test perf`.
+[[test]]
+name = "perf"
+path = "../../tests/perf.rs"
+
 [dependencies]
 surf-syntax = { workspace = true }
 surf-vm = { workspace = true }

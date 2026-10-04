@@ -95,3 +95,28 @@ jobs:
         env:
           SURF_CHROME: ${{ steps.chrome.outputs.chrome-path }}
         run: cargo test -p surf-cli --test e2e -- --nocapture
+
+  # Performance gates (tests/perf.rs) on a release build. Reported, not yet
+  # blocking: the budgets were set on a developer Mac (docs/quiet-cdp.md
+  # §5) and the shared runners' numbers are unknown until this has run a
+  # while — see TASKS.md.
+  perf:
+    needs: [test]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+        with:
+          chrome-version: stable
+      - name: perf gates (release)
+        env:
+          SURF_CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: cargo test --release -p surf-cli --test perf -- --nocapture --test-threads=1
