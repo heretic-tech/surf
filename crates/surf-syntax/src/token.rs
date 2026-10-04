@@ -1,6 +1,7 @@
 //! Token kinds produced by the lexer.
 
 use crate::span::Span;
+use serde::{Deserialize, Serialize};
 
 /// A lexed token with its span.
 #[derive(Debug, Clone, PartialEq)]
@@ -12,7 +13,7 @@ pub struct Token {
 }
 
 /// One piece of an interpolated string literal.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum StrPart {
     /// Literal text (escapes already resolved).
     Lit(String),
@@ -151,7 +152,127 @@ pub enum TokenKind {
     Percent,
 }
 
+/// Every reserved keyword, for `did you mean` suggestions.
+pub const KEYWORDS: &[&str] = &[
+    "if",
+    "elif",
+    "else",
+    "for",
+    "in",
+    "while",
+    "loop",
+    "break",
+    "continue",
+    "fn",
+    "return",
+    "try",
+    "catch",
+    "and",
+    "or",
+    "not",
+    "true",
+    "false",
+    "nil",
+    "emit",
+    "exit",
+    "spawn",
+    "parallel",
+    "task",
+    "actor",
+    "supervisor",
+    "on",
+];
+
 impl TokenKind {
+    /// Whether this token is a reserved keyword.
+    pub fn is_keyword(&self) -> bool {
+        self.keyword_text().is_some()
+    }
+
+    /// The source text of a keyword token.
+    pub fn keyword_text(&self) -> Option<&'static str> {
+        Some(match self {
+            TokenKind::If => "if",
+            TokenKind::Elif => "elif",
+            TokenKind::Else => "else",
+            TokenKind::For => "for",
+            TokenKind::In => "in",
+            TokenKind::While => "while",
+            TokenKind::Loop => "loop",
+            TokenKind::Break => "break",
+            TokenKind::Continue => "continue",
+            TokenKind::Fn => "fn",
+            TokenKind::Return => "return",
+            TokenKind::Try => "try",
+            TokenKind::Catch => "catch",
+            TokenKind::And => "and",
+            TokenKind::Or => "or",
+            TokenKind::Not => "not",
+            TokenKind::True => "true",
+            TokenKind::False => "false",
+            TokenKind::Nil => "nil",
+            TokenKind::Emit => "emit",
+            TokenKind::Exit => "exit",
+            TokenKind::Spawn => "spawn",
+            TokenKind::Parallel => "parallel",
+            TokenKind::Task => "task",
+            TokenKind::Actor => "actor",
+            TokenKind::Supervisor => "supervisor",
+            TokenKind::On => "on",
+            _ => return None,
+        })
+    }
+
+    /// Human description for diagnostics: `` identifier `x` ``, `` `(` ``,
+    /// `end of line`, …
+    pub fn describe(&self) -> String {
+        if let Some(kw) = self.keyword_text() {
+            return format!("keyword `{kw}`");
+        }
+        match self {
+            TokenKind::Indent => "an indented block".into(),
+            TokenKind::Dedent => "end of block".into(),
+            TokenKind::Newline => "end of line".into(),
+            TokenKind::Eof => "end of file".into(),
+            TokenKind::Ident(name) => format!("identifier `{name}`"),
+            TokenKind::Int(v) => format!("integer `{v}`"),
+            TokenKind::Float(v) => format!("float `{v}`"),
+            TokenKind::Str(_) => "string literal".into(),
+            TokenKind::Duration(_) => "duration literal".into(),
+            other => format!("`{}`", other.punct_text().unwrap_or("?")),
+        }
+    }
+
+    /// Source text of a punctuation token.
+    pub fn punct_text(&self) -> Option<&'static str> {
+        Some(match self {
+            TokenKind::LParen => "(",
+            TokenKind::RParen => ")",
+            TokenKind::LBracket => "[",
+            TokenKind::RBracket => "]",
+            TokenKind::LBrace => "{",
+            TokenKind::RBrace => "}",
+            TokenKind::Comma => ",",
+            TokenKind::Colon => ":",
+            TokenKind::Dot => ".",
+            TokenKind::DotDot => "..",
+            TokenKind::DotDotEq => "..=",
+            TokenKind::Eq => "=",
+            TokenKind::EqEq => "==",
+            TokenKind::NotEq => "!=",
+            TokenKind::Lt => "<",
+            TokenKind::LtEq => "<=",
+            TokenKind::Gt => ">",
+            TokenKind::GtEq => ">=",
+            TokenKind::Plus => "+",
+            TokenKind::Minus => "-",
+            TokenKind::Star => "*",
+            TokenKind::Slash => "/",
+            TokenKind::Percent => "%",
+            _ => return None,
+        })
+    }
+
     /// Map a word to its keyword token, if it is one.
     pub fn keyword(word: &str) -> Option<TokenKind> {
         Some(match word {
