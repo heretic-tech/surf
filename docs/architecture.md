@@ -16,9 +16,13 @@ crates/
   surf-cli       `surf run | check | doctor | repl | install` — tokio current_thread + LocalSet, exit codes, diagnostics rendering
   surf-testserver in-process axum fixture server (+ `fixtures/*.html`) shared by surf-browser's tests and the e2e suite; dev-dependency only
 protocol/        vendored browser_protocol.json + js_protocol.json (+ VERSION) for codegen
-docs/            this file, language.md
+docs/            this file, language.md, quiet-cdp.md (flags, domains, detector results, perf numbers)
 examples/        hello, login, two-tabs, scrape-emit, parallel-pool, supervised
 tests/e2e/       main.rs (the runner; declared as surf-cli's `e2e` test target) + `scripts/<name>.surf` + `<name>.out` (+ optional `.err`, `.code`), run through the built `surf` binary
+tests/perf.rs    performance gates on the built binary (surf-cli's `perf` test target; budgets assert in `--release`)
+tests/vm/        noop.surf for the cold-start gate
+tools/detector/  index.html — the local detector page (served at `/detector`, embedded in `surf doctor --detector`); control.py — a deliberately noisy client that must make it FAIL
+tools/           live-detectors.surf (public detector run → tools/out/, gitignored)
 ```
 
 Dependency direction (strict, no cycles):
@@ -817,10 +821,19 @@ message includes the browser's stderr tail). Exit codes: 0, 1 runtime, 2
 syntax, 3 no browser (discovery failed or `browser.path` / `SURF_CHROME`
 is not a binary), 130 interrupted, or `exit(n)`.
 
+`--trace-cdp` also switches the default log filter to
+`warn,surf_cdp::trace=debug` (RUST_LOG still wins) and the first traced
+frame logs `first CDP frame sent N ms after start`, measured from
+`surf_cdp::connection::mark_process_start()` at the top of `main`.
+
 `surf doctor`: discovery (path, origin, `--version`), display detection,
 Xvfb presence on Linux, a timed headless pipe launch (`surf_browser::launch`
-→ `Browser.getVersion` round trip → the exact flag list → the shutdown
-ladder timing). `surf repl`: one chunk per line (a line ending in `:` opens
+→ the `transport:` line is spawn → first `Browser.getVersion` answered →
+a second round trip → the exact flag list → the shutdown ladder timing).
+`surf doctor --detector` then launches a browser the way a script would
+(headed when a display exists), writes the embedded `tools/detector/index.html`
+to a temp file, loads it, types / hovers / clicks, and prints every
+`<li data-check>` row (exit 1 on a `FAIL`). `surf repl`: one chunk per line (a line ending in `:` opens
 a block closed by an empty line) on one `Runtime` via `Runtime::exec`, so
 the browser, pages, `fn`s and handlers persist; top-level variables do not
 (TASKS.md). `surf install`: reads Chrome for Testing's
@@ -855,15 +868,27 @@ scripts are IO-bound.
   present, and the exit code with `<name>.code` (default 0); a mismatch
   prints a unified diff. `SURF_E2E_FILTER=<substring>` runs a subset,
   `SURF_E2E_UPDATE=1` rewrites the expectations (review the diff),
-  `SURF_E2E_HEADED=1` runs headed. 33 scripts today: hello, login,
-  two-tabs, implicit-page, ambiguity, ambiguity-error, timeout-error,
+  `SURF_E2E_HEADED=1` runs headed; a script named `*-headed.surf` always
+  runs `--headed` and is skipped without a display. 35 scripts today: hello,
+  login, two-tabs, implicit-page, ambiguity, ambiguity-error, timeout-error,
   handler, handler-rebind, eval, eval-args, screenshot, forms, waits,
   navigation, dialogs, dialog-policy, hooks, intercept, block, cookies,
   local-storage, download, proxy-auth-browser, proxy-auth-page,
   shift-proxy, spawn-join, concurrency-basics, parallel-pool, supervised,
-  scout-workers, supervisor-giveup, one-for-all. Other tests cover
-  `--json`, a rendered runtime error, the shebang shorthand + `exit(n)`,
-  `surf check`, `surf doctor`, the REPL and the 50-page timing gate.
+  scout-workers, supervisor-giveup, one-for-all, detector, detector-headed.
+  Other tests cover `--json`, a rendered runtime error, the shebang
+  shorthand + `exit(n)`, `surf check`, `surf doctor`, the REPL, the 50-page
+  timing gate and the port-exposure gate (`lsof -iTCP -sTCP:LISTEN` on the
+  browser and `surf` pids while a script holds a browser open over the pipe).
+- `tests/perf.rs` (`cargo test --release --test perf`): cold start of
+  `tests/vm/noop.surf` (median of 20 < 10 ms), idle RSS with one browser
+  (< 15 MB), start → first CDP frame from `--trace-cdp` (< 500 ms). Debug
+  builds print the numbers without asserting. Measured values live in
+  `docs/quiet-cdp.md`.
+- Detection gate: `tools/detector/index.html` (checks listed in
+  `docs/quiet-cdp.md` §3) runs headless and headed in the e2e suite;
+  `tools/detector/control.py` is the noisy-client control that must FAIL
+  it; `tools/live-detectors.surf` is the manual public-detector run.
 - Fixture pages are served by the `surf-testserver` crate (in-process
   `axum`; `fixtures/*.html`; routes for cookies, redirects, a JSON API,
   a download, a `/proxy-echo` that names the proxy; also a

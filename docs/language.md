@@ -938,7 +938,7 @@ browser crashes the message ends with the last lines of its stderr.
 surf run <file.surf> [--json] [--trace-cdp] [--timeout 30s] [--headless|--headed] [--chrome <path>]
 surf <file.surf> …          # same; `#!/usr/bin/env surf` works as a shebang
 surf check <file.surf>       # parse + compile only
-surf doctor                  # Chrome found + version, display, timed pipe launch, flags
+surf doctor [--detector]     # Chrome found + version, display, timed pipe launch, flags; --detector runs tools/detector
 surf repl                    # one line (or block) at a time; browser and pages stay open; `.exit`
 surf install                 # Chrome for Testing (stable) → ~/.cache/surf/chrome/<version>/
 surf --version
@@ -946,3 +946,6 @@ surf --version
 
 `--json` makes `print` write `{"print": "…"}` lines, so stdout is one JSON
 document per line next to `emit`. `-` reads the script from stdin.
+`--trace-cdp` logs every CDP frame to stderr (`→` sent, `←` received) and
+one `first CDP frame sent N ms after start` line. What Surf sends and what
+detectors see is documented in `docs/quiet-cdp.md`.

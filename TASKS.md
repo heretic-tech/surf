@@ -57,9 +57,9 @@ something; link the PR / commit that picks it up.
       value assignment / `DOM.setFileInputFiles` instead (Playwright-style).
 - [ ] surf-browser `text=` resolver walks light DOM only (no shadow roots);
       CSS selectors likewise do not pierce shadow DOM.
-- [ ] surf-browser `Page.setLifecycleEventsEnabled` is on for every page
+- [x] surf-browser `Page.setLifecycleEventsEnabled` is on for every page
       (needed to await `load` / `networkIdle`); it is a DevTools-only
-      stream, not page-observable, but worth a note in the detection gate.
+      stream, not page-observable — noted in `docs/quiet-cdp.md` §2/§7.
 - [ ] surf-browser: `Element` handles are released with a spawned
       `Runtime.releaseObject` on drop; a page that never navigates and
       resolves millions of elements still accumulates nothing, but a
@@ -180,7 +180,9 @@ something; link the PR / commit that picks it up.
       isolation. Loosen to "the element was absent right after load".
 - [ ] The `print` sink is `println!` (line-buffered stdout); `emit` of very
       large documents should go through a `BufWriter` with an explicit
-      flush before exit.
+      flush before exit. Also: `surf run … | head` panics with `failed
+      printing to stdout: Broken pipe` once the reader goes away (seen in
+      step 10) — handle `EPIPE` by exiting quietly.
 - [ ] `page_method` temporarily swaps the page timeout for `goto(timeout:)`
       — racy if two tasks share a page (task 8 gives tasks private pages,
       but `page(n)` is shared). Thread the timeout through
@@ -190,23 +192,42 @@ something; link the PR / commit that picks it up.
 - [ ] LSP server (`surf lsp`) + VS Code extension with a TextMate grammar.
 - [x] `surf doctor` (step 7): discovery origin + version, display, Xvfb on
       Linux, timed headless pipe launch, `Browser.getVersion` round trip,
-      the exact flag list, shutdown ladder timing. Still to add:
-      `navigator.webdriver` check and an isolated-world sanity eval.
+      the exact flag list, shutdown ladder timing. Step 10 added the
+      `transport:` line (spawn → first `Browser.getVersion`) and
+      `--detector` (the local detector page, which covers the
+      `navigator.webdriver` check and an isolated-world eval).
       The path-only `surf_browser::find_chrome()` wrapper is now unused by
       the CLI; delete it when nothing else needs it.
 - [x] `surf install` (step 7; see the deferral above for its limits).
-- [ ] Detection gate (step 10): assert `navigator.webdriver === false` on a
-      launched browser and keep
+- [x] Detection gate (step 10): `tools/detector/index.html` asserts
+      `navigator.webdriver === false` (and the rest of `docs/quiet-cdp.md`
+      §3) through the whole stack, headless and headed, in the e2e suite;
       `tests/launch.rs::webdriver_is_true_without_automationcontrolled_switch`
-      as the control (Decision 12). If a future Chrome stops setting the
-      flag for a debugger pipe, that control test fails and the switch can
-      be reconsidered.
+      stays as the control (Decision 12). If a future Chrome stops setting
+      the flag for a debugger pipe, that control test fails and the switch
+      can be reconsidered.
 - [x] `surf repl` (step 7; variables do not persist — see above).
-- [ ] Detection + perf gates in CI (cold start < 5 ms VM, launch-to-first-
-      action budget, zero forbidden methods in a CDP trace). Measured on
-      this Mac (debug build): `surf doctor` pipe launch to
-      `Browser.getVersion` 312 ms, round trip 13 ms, ladder close 116 ms;
-      `hello.surf` against the fixture end to end ≈ 1.0 s.
+- [x] Detection + perf gates (step 10): `tests/perf.rs` behind
+      `cargo test --release --test perf` (noop cold start 1.8 ms median,
+      idle RSS 6.1 MB, start → first CDP frame 39–47 ms — all under budget,
+      recorded in `docs/quiet-cdp.md` §5); the port-exposure gate and the
+      detector scripts run in the e2e suite. CI runs the perf job on both
+      runners with `continue-on-error: true` (reported, not blocking);
+      make it blocking once the runners' numbers are known — they will
+      differ from the Mac's and may need their own budgets.
+- [ ] Detector follow-ups (step 10): the classic `Error.stack`-accessor
+      leak no longer discriminates on Chrome 154 (the `prepareStackTrace`
+      variant does) — re-measure both with each Chrome major and drop the
+      classic one when no supported Chrome leaks there. `tools/detector/
+      control.py` needs `websocket-client`; a Rust control (a tiny
+      websocket client that sends `Runtime.enable`, bypassing
+      `FORBIDDEN_METHODS`) would let CI prove the detector is not vacuous.
+      Headless runs keep `HeadlessChrome` in the UA (informational; Surf
+      does not rewrite it). rebrowser's `exposeFunctionLeak` is
+      unexercisable (no `exposeFunction`); its three main-world traps stay
+      untriggered from the isolated world — re-run `tools/live-detectors.surf`
+      before quoting any live result, and again when the opt-in main-world
+      eval (above) lands.
 
 ## Scaffold notes (step 1)
 - The wasm32 build needs the rustup toolchain's `rustc`; on a machine where
