@@ -12,11 +12,13 @@ crates/
   surf-vm        AST → bytecode; single-threaded async stack VM; Value; Host trait; stdlib             [wasm32-clean]
   surf-cdp       Transport (pipe | websocket), \0 framing, Connection (id/session mux), Session, Event, typed Command codegen   [Send + Sync]
   surf-browser   Chrome discovery, quiet launch (exact flag list, crash watcher, shutdown ladder), Xvfb (display.rs), Browser, Page (rebindable backing), isolated World, selectors, auto-wait actions, input, network hooks, cookies, MutationObserver
-  surf-runtime   implements surf_vm::Host: implicit browser/page, bare actions, NativeObject wrappers, handlers, spawn/parallel for, tasks, actors, supervisors, lifetime rule
-  surf-cli       `surf run | check | doctor | repl` — tokio current_thread + LocalSet, exit codes, diagnostics rendering
+  surf-runtime   implements surf_vm::Host: lazy browser slots, implicit page resolution, bare actions, NativeObject wrappers, `on element_appears`, lifetime rule (spawn/parallel for/tasks/actors/supervisors: task 8)
+  surf-cli       `surf run | check | doctor | repl | install` — tokio current_thread + LocalSet, exit codes, diagnostics rendering
+  surf-testserver in-process axum fixture server (+ `fixtures/*.html`) shared by surf-browser's tests and the e2e suite; dev-dependency only
 protocol/        vendored browser_protocol.json + js_protocol.json (+ VERSION) for codegen
 docs/            this file, language.md
 examples/        hello, login, two-tabs, scrape-emit, parallel-pool, supervised
+tests/e2e/       `scripts/<name>.surf` + `<name>.out` (+ optional `.code`), run through the built `surf` binary by crates/surf-cli/tests/e2e.rs
 ```
 
 Dependency direction (strict, no cycles):
@@ -580,6 +582,80 @@ asserts the only `*.enable` sent is `Page.enable` — no `Runtime.enable`,
 `binding_called_fires_without_runtime_enable` verifies Decision 9's
 channel.
 
+### surf-runtime (task 7)
+
+```rust
+pub struct RuntimeOptions { trace_cdp, chrome_path, headless: Option<bool>, json, timeout: Option<Duration>, color }
+pub struct Runtime;                       // Rc; one per `surf run` / REPL session; implements surf_vm::Host
+impl Runtime {
+    pub fn new(opts) -> Rc<Runtime>;
+    pub async fn run(self: &Rc<Self>, name, source) -> Result<i32, RunError>;          // compile → main body → lifetime rule → shutdown → exit code
+    pub async fn exec(self: &Rc<Self>, name, source) -> Result<Option<i32>, RunError>; // one REPL chunk; nothing waited for or closed
+    pub async fn shutdown(&self);          // close every launched browser (15 s cap each)
+    pub fn render_error(&self, &RuntimeError) -> String;   // ariadne, with the script line / selector / CDP method
+}
+pub async fn run_source(name, source, opts) -> Result<i32, RunError>;   // Runtime::new(opts).run(…)
+pub fn is_no_browser(&RuntimeError) -> bool;   // discovery failed / bad `browser.path` → CLI exit 3
+```
+
+**Browser slots** (`browsers.rs`). Every `browser:` / `browser name:` block
+becomes a [`BrowserSlot`] (`"default"` for the unnamed block) holding a
+`BrowserConfig` (`config.rs`: props → `LaunchOptions`; values that do not
+type-check and `engine: apostate` are recorded and raised at first use,
+never at declaration). Nothing launches until an action needs a page;
+`BrowserSlot::get` serialises concurrent first uses behind a
+`tokio::sync::Mutex`, applies the CLI overrides (`--chrome`,
+`--headless` / `--headed`, `--timeout` win over the script), prints the
+one-line "running headless" notice when `headless:` is unset and no
+display exists, then `Browser::launch` (or `Browser::connect` for
+`pool:`; `cdp: "ws://…"` goes through `launch` as `CdpMode::Attach`).
+
+**Implicit resolution** (`pages.rs`). A bare action asks `Runtime::sole_page(action)`:
+the task context (a `tokio::task_local!` `TaskCtx`) wins when it has a
+page bound — a handler body is bound to the page its event fired on, a
+spawned task (task 8) gets a private page on its first bare action —
+otherwise the *default browser*'s `Browser::sole_page()` (page 1 is
+created on demand; several open → `BrowserError::Ambiguous` → `several
+pages are open (1, 2, "login") — say which: page(2).click(…)`). The default
+browser is the unnamed block, the implicit one when nothing is declared, or
+the only named one; two named browsers and no unnamed block is `several
+browsers are declared ("work", "home") — say which: work.goto(…)`.
+
+**Name resolution.** `Host::resolve_global` answers user `fn`s, `page`
+(a lazy `PageObject` that binds on its first method call — so
+`page.goto(…)` and `page(2)` both work without an async lookup), `browser`
+and named browsers (`BrowserObject`), and every bare action as a callable
+`BareAction` — they therefore shadow stdlib names of the same spelling
+(`type`); `type(v)` with one argument falls back to the stdlib function.
+`Host::call_global` handles what is left: `shift_proxy` / `send` /
+`broadcast` / `receive` and declared tasks / actors are clear "arrives with
+task 8" errors; anything else is `undefined function` with a suggestion.
+All page methods live in one dispatcher (`methods.rs::page_method`) shared
+by bare actions, `page.…`, `page(n).…` and `browser.…`; elements
+(`all`, `first`, `wait`, the `event` of `on element_appears`) use
+`element_method`. `BrowserError` → `RuntimeError` conversion (`errors.rs`)
+fills `selector` / `cdp_method` and keeps the original error as the cause.
+`eval(fn(): …)` slices the lambda's source text by its span (the runtime
+keeps the script text) and sends it verbatim; a block lambda becomes an
+IIFE.
+
+**`on element_appears`** (`handlers.rs`, Decision 9). Each page the runtime
+hands out gets one observer task when at least one such handler is
+declared (`Runtime::instrument` runs after every page creation):
+`page.world()` → `Runtime.addBinding{name: __surf_on_<random>,
+executionContextId}` → a `MutationObserver` installed under random names
+that resolves every handler's selector through the world's resolver and
+calls the binding once per newly matching element (handles are kept in an
+isolated-world array so the handler receives the element) → listen for
+`Runtime.bindingCalled` and main-frame `Page.frameNavigated` (re-install in
+the fresh world; up to four attempts while the context settles). Each
+firing runs the body on a `spawn_local` task with a forked VM. Measured:
+`Runtime.bindingCalled` arrives without `Runtime.enable` through the whole
+stack (e2e `handler` script); no polling fallback was needed.
+
+**Additive surf-browser change (task 7):** `Element::from_handle(page, world,
+object_id, label)` — wrap a handle the runtime already holds.
+
 ### Lifetime rule
 
 A program stays alive while any handler block is registered or any task is
@@ -588,6 +664,41 @@ launched are closed (temp profiles deleted, `profile:` dirs kept) and the
 process exits 0. `exit` / `exit(n)` cancels every task via `CancelToken`,
 closes everything, and exits with `n`. Attached browsers (`cdp: "ws://…"`,
 `pool:`) are never closed.
+
+Implementation (`lifetime.rs`): counters for running tasks and installed
+observers plus a `Notify`; `Runtime::finish` awaits `quiescent()` after the
+main body. "Registered" means *installed on a page*: a script that declares
+`on element_appears` but never touches a browser still exits (nothing could
+ever fire). The main body runs under `tokio::select!` against
+`exit_signal()`, so `exit` from a handler or Ctrl-C (`tokio::signal::ctrl_c`
+→ exit 130) drops it mid-await — a `goto` waiting on a slow page does not
+delay shutdown. A handler body that errors is rendered on stderr, the
+program continues, and the final exit code is 1.
+
+### surf-cli
+
+`surf run <file> [--json] [--trace-cdp] [--timeout 30s] [--headless|--headed]
+[--chrome <path>]`; `surf <file.surf>` is rewritten to `surf run …` before
+clap sees it (so `#!/usr/bin/env surf` works — the lexer treats the shebang
+as a comment). `--json` makes `print` write `{"print": "…"}` lines;
+`--trace-cdp` sets `SURF_TRACE_CDP=1` before launch and `set_trace(true)`
+after. Runtime errors are rendered by `Runtime::render_error` (ariadne:
+message, script line, `selector:` label, `CDP method:` note; a crash
+message includes the browser's stderr tail). Exit codes: 0, 1 runtime, 2
+syntax, 3 no browser (discovery failed or `browser.path` / `SURF_CHROME`
+is not a binary), 130 interrupted, or `exit(n)`.
+
+`surf doctor`: discovery (path, origin, `--version`), display detection,
+Xvfb presence on Linux, a timed headless pipe launch (`surf_browser::launch`
+→ `Browser.getVersion` round trip → the exact flag list → the shutdown
+ladder timing). `surf repl`: one chunk per line (a line ending in `:` opens
+a block closed by an empty line) on one `Runtime` via `Runtime::exec`, so
+the browser, pages, `fn`s and handlers persist; top-level variables do not
+(TASKS.md). `surf install`: reads Chrome for Testing's
+`last-known-good-versions-with-downloads.json`, downloads the stable build
+for this platform with the system `curl`, unpacks with `unzip` (`tar` on
+Windows) into `~/.cache/surf/chrome/<version>/`, and verifies with
+`--version`; discovery picks it up from there.
 
 ## Threading model
 
@@ -603,6 +714,16 @@ scripts are IO-bound.
 - `crates/surf-cli/tests/e2e.rs` runs against a real Chrome: `SURF_CHROME`
   overrides discovery; when no Chrome is found the test prints a skip
   message and passes. It must actually run on developer Macs and in the CI
-  `e2e` job.
-- Fixture pages are served by an in-process `axum` server (dev-dependency).
+  `e2e` job. `scripts_match_expected_output` runs every
+  `tests/e2e/scripts/<name>.surf` through the built `surf` binary
+  (`--headless --timeout 15s`, `SURF_E2E_BASE` = fixture URL,
+  `SURF_E2E_TMP` = scratch dir) and compares stdout with `<name>.out` and
+  the exit code with `<name>.code` (default 0). Scripts today: hello,
+  login, two-tabs, implicit-page, ambiguity (the error message), handler
+  (`on element_appears` + `exit`), eval (JSON results, lambda body),
+  screenshot. Other tests cover `--json`, a rendered runtime error, the
+  shebang shorthand + `exit(n)`, `surf check`, `surf doctor`, and the REPL.
+- Fixture pages are served by the `surf-testserver` crate (in-process
+  `axum`; `fixtures/*.html`; also a `surf-testserver [port]` binary for
+  running scripts by hand).
 - Codegen input: `protocol/*.json`, pinned in `protocol/VERSION`.

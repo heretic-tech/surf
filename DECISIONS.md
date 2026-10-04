@@ -84,6 +84,15 @@ binding registered with `Runtime.addBinding{executionContextId}` fires
 e2e test. Rules out: `DOM.enable`, `DOM.getDocument`-based polling,
 `Runtime.enable`.
 
+Verified (step 7, Google Chrome 154.0.8037.95, macOS arm64): the full
+stack — `on element_appears("#appeared"):` in a script, observer installed
+in a fresh isolated world after `goto`, element added by the page 800 ms
+later — delivers `Runtime.bindingCalled` and runs the handler
+(`tests/e2e/scripts/handler.surf`, plus
+`surf-browser/tests/pages.rs::binding_called_fires_without_runtime_enable`
+at the protocol level). The 50 ms isolated-world poll contemplated as a
+fallback was not needed and is not implemented.
+
 ## 10. Page identity decoupled from the CDP target (rebind)
 
 A script's `page` value is `Rc<PageInner>`; the CDP backing

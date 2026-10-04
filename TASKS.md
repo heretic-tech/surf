@@ -117,25 +117,72 @@ something; link the PR / commit that picks it up.
 - [ ] surf-vm: `Op` is an enum of up to 16 bytes; if a profile ever shows
       dispatch cost, pack to u32 words. Not worth it for IO-bound scripts.
 
+## Runtime (step 7 deferrals)
+- [ ] `on navigation` / `on dialog` / `on request` / `on response` /
+      `on message` handlers are declared and stored but never fire (a
+      warning is printed). `element_appears` is the only live handler;
+      its observer task is per page and is **not** re-attached after
+      `Page::rebind` (the session changes) — task 8 must re-instrument on
+      restart / `shift_proxy()`.
+- [ ] `task` / `actor` / `supervisor` declarations are stored
+      (`Runtime::declarations`); calling or spawning one is a clear "arrives
+      with task 8" error, supervisors warn that they do not start.
+      `spawn`, `parallel for`, `shift_proxy()`, `send` / `broadcast` /
+      `receive` / `wait_for_message` likewise. `TaskCtx::spawned()` is the
+      hook for private pages.
+- [ ] `surf repl`: top-level variables do not persist between lines (each
+      chunk compiles to its own `<main>` whose locals die with it). Needs a
+      VM hook for "top-level assignments become host globals" (or the REPL
+      re-declaring them through `Host::resolve_global`).
+- [ ] `surf install` shells out to `curl` and `unzip` (`tar` on Windows).
+      Replace with an in-process HTTPS client only if a dependency-free one
+      is acceptable (rustls is already pulled in by tokio-tungstenite).
+      Also: pin to a requested version (`surf install 131`), prune old
+      versions, print the discovery order.
+- [ ] `examples/hello.surf` prints `text("h1")` of https://example.com, but
+      IANA's 2025 redesign of that page has no `<h1>` any more (observed
+      2026-10-04: the body is `<p>` + `<a>`), so the live example times out
+      on `h1` while `title()` / `text("p")` work. The canonical form is
+      pinned by the brief and by `surf-syntax`'s parse snapshot; decide
+      whether to change the example (and `docs/language.md`'s opener) or
+      point it at a page that still has a heading. The e2e `hello` script
+      runs the same program against the fixture server.
+- [ ] `examples/two-tabs.surf` types into `input[name=q]` on example.com,
+      which has no such input; same decision as above.
+- [ ] `surf-browser/tests/pages.rs::auto_wait_and_timeouts` asserts
+      `text("#appeared")` took ≥ 500 ms; under a full `cargo test --workspace`
+      (several Chromes at once) the navigation can finish late enough that
+      the wait is shorter and the assertion fails. Seen once; passes in
+      isolation. Loosen to "the element was absent right after load".
+- [ ] The `print` sink is `println!` (line-buffered stdout); `emit` of very
+      large documents should go through a `BufWriter` with an explicit
+      flush before exit.
+- [ ] `page_method` temporarily swaps the page timeout for `goto(timeout:)`
+      — racy if two tasks share a page (task 8 gives tasks private pages,
+      but `page(n)` is shared). Thread the timeout through
+      `Page::goto` instead.
+
 ## Tooling
 - [ ] LSP server (`surf lsp`) + VS Code extension with a TextMate grammar.
-- [ ] `surf doctor` full report: Chrome version, flags used, pipe round-trip
-      latency, `navigator.webdriver` check, isolated-world sanity. Switch it
-      from the path-only `surf_browser::find_chrome()` wrapper to
-      `surf_browser::discovery::find_chrome(None)` (version, origin,
-      `search_locations()`), then delete the wrapper.
-- [ ] `surf install`: download Chrome for Testing into
-      `~/.cache/surf/chrome/<version>/` (discovery already walks that tree,
-      newest version first).
+- [x] `surf doctor` (step 7): discovery origin + version, display, Xvfb on
+      Linux, timed headless pipe launch, `Browser.getVersion` round trip,
+      the exact flag list, shutdown ladder timing. Still to add:
+      `navigator.webdriver` check and an isolated-world sanity eval.
+      The path-only `surf_browser::find_chrome()` wrapper is now unused by
+      the CLI; delete it when nothing else needs it.
+- [x] `surf install` (step 7; see the deferral above for its limits).
 - [ ] Detection gate (step 10): assert `navigator.webdriver === false` on a
       launched browser and keep
       `tests/launch.rs::webdriver_is_true_without_automationcontrolled_switch`
       as the control (Decision 12). If a future Chrome stops setting the
       flag for a debugger pipe, that control test fails and the switch can
       be reconsidered.
-- [ ] `surf repl`.
+- [x] `surf repl` (step 7; variables do not persist — see above).
 - [ ] Detection + perf gates in CI (cold start < 5 ms VM, launch-to-first-
-      action budget, zero forbidden methods in a CDP trace).
+      action budget, zero forbidden methods in a CDP trace). Measured on
+      this Mac (debug build): `surf doctor` pipe launch to
+      `Browser.getVersion` 312 ms, round trip 13 ms, ladder close 116 ms;
+      `hello.surf` against the fixture end to end ≈ 1.0 s.
 
 ## Scaffold notes (step 1)
 - The wasm32 build needs the rustup toolchain's `rustc`; on a machine where

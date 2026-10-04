@@ -395,9 +395,18 @@ Rules:
 - Unknown keys are a `surf check` error (the parser knows the key list and
   suggests the closest known key). A key given twice is also an error.
 - `browser work:` declares a **named** browser `work`; it is a value:
-  `work.page(2).goto(…)`, `work.close()`. The unnamed `browser:` block
-  configures the default browser (the one bare actions use). At most one
-  unnamed block per file.
+  `work.page(2).goto(…)`, `work.close()`, `work.pages()`,
+  `work.new_page(proxy: …, name: …)`, and any page action (`work.goto(…)`
+  means its sole page). The unnamed `browser:` block configures the default
+  browser (the one bare actions use). At most one unnamed block per file.
+  With no unnamed block, bare actions use the only named browser; with
+  several named browsers and no unnamed block they are an error:
+  `several browsers are declared ("work", "home") — say which: work.goto(…)`.
+- Values that do not type-check (`size: "wide"`, `timeout: 3`) and
+  `engine: apostate` are reported the first time the browser is needed, so
+  a script that never touches the browser still runs.
+- Command-line flags win over the block: `--chrome` sets `path`,
+  `--headless` / `--headed` force the mode, `--timeout` sets `timeout`.
 - `cdp: 9222` opens a listening port (websocket). `cdp: "ws://…"` attaches
   to an already-running browser (nothing is launched, nothing is closed on
   exit). `pool:` is a remote websocket provider; when set, `path`,
@@ -425,13 +434,20 @@ creation order (1-based) plus optional names.
   after `page(1)` exists becomes page 2.
 - **Bare actions** (`goto click type fill press hover check select scroll
   text html attr value exists count all wait wait_gone wait_text wait_url
-  eval screenshot pdf url title back reload cookies set_cookie …`) and
-  `browser.goto(…)` resolve to the sole page. If several pages are open,
-  the error is:
+  eval screenshot pdf url title back reload cookies set_cookie …` — every
+  page method except `close`) and `browser.goto(…)` resolve to the sole
+  page. If several pages are open, the error is:
 
   ```
   several pages are open (1, 2, "login") — say which: page(2).click(…)
   ```
+
+- Bare actions shadow builtins of the same name. The one collision is
+  `type`: `type(sel, text)` is the action, `type(v)` with a single argument
+  is the builtin that names a value's type.
+- `page` used as a value is a lazy handle: `h = page` binds to the sole
+  page on its first method call. `page.index`, `page.name`, `page.open`
+  are properties; `emit page` gives `{"index", "name", "url"}`.
 
 - `page.close()` closes a tab; indices of the remaining pages do not shift.
 - Inside a spawned task, an actor, a `parallel for` body, or a handler
@@ -463,21 +479,33 @@ attached, visible, stable (not animating) and enabled, up to `timeout`
 | `type(sel, text, delay: 0ms)` | nil | key-by-key |
 | `fill(sel, text)` | nil | select-all + insert |
 | `press(key)` / `press(sel, key)` | nil | `"Enter"`, `"Control+a"` |
-| `hover(sel)` `check(sel)` `select(sel, value)` `scroll(sel)` | nil | |
-| `text(sel)` `html(sel)` `attr(sel, name)` `value(sel)` | string | |
+| `hover(sel)` `focus(sel)` `check(sel)` `uncheck(sel)` `scroll(sel)` | nil | `scroll(x, y)` / `scroll_to(x, y)` scroll the window |
+| `select(sel, value)` / `select(sel, [values])` | list of selected values | by value, label or text |
+| `text(sel)` `html(sel)` `value(sel)` | string | `attr(sel, name)` is a string or nil |
 | `exists(sel)` | bool | no wait |
 | `count(sel)` | int | no wait |
-| `all(sel)` | list of elements | element methods: `text() html() attr(n) value() click() type(t) …` |
-| `wait(sel)` `wait_gone(sel)` `wait_text(sel, t)` `wait_url(pattern)` | nil | |
-| `eval(js)` / `eval(fn(): expr)` | JSON value | runs in the isolated world |
+| `all(sel)` / `first(sel)` | list of elements / element or nil | element methods: `text() html() attr(n) value() visible() click() type(t) fill(t) press(k) check() select(v) scroll() eval(js) all(sel) first(sel)`; `.selector` property |
+| `wait(sel)` | the element | attached and visible; `wait(2s)` sleeps |
+| `wait_gone(sel)` `wait_text(sel, t)` `wait_url(pattern)` `wait_navigation()` | nil | `wait_url` takes a glob (`*`) or `re:…` |
+| `eval(js)` / `eval(fn(): expr)` | JSON value | runs in the isolated world; `undefined` → nil |
 | `screenshot(path, full: false)` `pdf(path)` | nil | |
 | `url()` `title()` | string | |
-| `back()` `reload()` | nil | |
-| `cookies()` | list of maps | `set_cookie({name, value, domain, …})` |
+| `back()` `forward()` | bool (moved?) | `reload()` → nil; all take `wait_until:` |
+| `cookies()` | list of maps | `{name, value, domain, path, expires, http_only, secure, same_site}` |
+| `set_cookie(map)` / `set_cookie(name, value)` / `set_cookies([maps])` / `clear_cookies()` | nil | a cookie without `domain` / `url` is set for the current URL |
+| `viewport(w, h)` `on_dialog("accept" \| "dismiss" \| text)` `dialogs()` | nil / list | |
+| `page.close()` | nil | pages only, never bare |
+
+Every selector action takes `timeout:`; `type` also takes `delay:`.
+Unknown keywords are an error naming the keyword. Durations are accepted
+wherever a timeout is (`timeout: 5s`).
 
 `eval(fn(): document.cookie)` — a zero-arg lambda whose body is translated
 to JavaScript source text verbatim (the lambda body is **not** Surf; it is
-sent as-is). Use `eval("…")` for anything but the simplest expressions.
+sent as-is; a block lambda becomes an immediately invoked function, so
+`return` works). Use `eval("…")` for anything but the simplest
+expressions, and remember that `{` `}` interpolate inside a Surf string:
+write a JavaScript object literal as `eval("(\{a: 1\})")`.
 
 ---
 
@@ -512,7 +540,13 @@ on response("*.json"):
 - Handlers are registered before the first statement runs (they are hoisted
   declarations), and stay registered for the life of the program.
 - `element_appears` is backed by an isolated-world MutationObserver and
-  fires once per newly matching element.
+  fires once per newly matching element (also for elements present when
+  a page loads). `event` is the element (`event.text()`, `event.click()`,
+  `event.selector`); bare actions inside the body act on the page the
+  element appeared on. Observers survive navigation (they are installed
+  again in the new document).
+- `navigation`, `dialog`, `request`, `response` and `message` handlers are
+  accepted but do not fire yet (a warning is printed; tasks 8 / 9).
 - `on message:` inside an actor body receives each mailbox message as
   `event` (alternative to calling `receive()` in a loop).
 
@@ -520,7 +554,12 @@ on response("*.json"):
 
 A program stays alive while any handler is registered or any task is
 running. When the main body finishes and nothing is pending, the browser is
-closed and the process exits 0. `exit` ends it immediately.
+closed and the process exits 0. `exit` ends it immediately (also from
+inside a handler body), as does Ctrl-C (exit code 130). "Registered" means
+installed on a page: a script that declares a handler but never opens a
+page exits when its main body ends. A handler body that raises an
+uncaught error is reported on stderr, the program keeps running, and the
+final exit code is 1.
 
 ---
 
@@ -771,4 +810,21 @@ ariadne), with a `Help:` line wherever the fix is obvious (`did you mean
 statement`).
 
 Exit codes: `0` ok, `1` runtime error, `2` syntax error, `3` no browser
-found, or whatever `exit(n)` said.
+found (discovery failed, or `browser.path` / `SURF_CHROME` is not a
+binary), `130` interrupted (Ctrl-C), or whatever `exit(n)` said. When the
+browser crashes the message ends with the last lines of its stderr.
+
+## 11. Command line
+
+```
+surf run <file.surf> [--json] [--trace-cdp] [--timeout 30s] [--headless|--headed] [--chrome <path>]
+surf <file.surf> …          # same; `#!/usr/bin/env surf` works as a shebang
+surf check <file.surf>       # parse + compile only
+surf doctor                  # Chrome found + version, display, timed pipe launch, flags
+surf repl                    # one line (or block) at a time; browser and pages stay open; `.exit`
+surf install                 # Chrome for Testing (stable) → ~/.cache/surf/chrome/<version>/
+surf --version
+```
+
+`--json` makes `print` write `{"print": "…"}` lines, so stdout is one JSON
+document per line next to `emit`. `-` reads the script from stdin.
