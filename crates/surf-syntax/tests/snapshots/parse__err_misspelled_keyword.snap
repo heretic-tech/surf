@@ -1,0 +1,13 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_misspelled_keyword\", \".surf\"), src)"
+---
+[31merror:[0m expected end of line, found identifier `x`
+   ╭─[ err_misspelled_keyword.surf:1:7 ]
+   │
+ 1 │ whlie x:
+   │       ┬  
+   │       ╰── unexpected
+   │ 
+   │ Help: did you mean `while`?
+───╯

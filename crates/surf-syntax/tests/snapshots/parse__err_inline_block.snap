@@ -1,0 +1,13 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_inline_block\", \".surf\"), src)"
+---
+[31merror:[0m expected a newline after `:`, found identifier `print`
+   ╭─[ err_inline_block.surf:1:7 ]
+   │
+ 1 │ if x: print(1)
+   │       ──┬──  
+   │         ╰──── here
+   │ 
+   │ Help: the block body goes on the following line(s), indented deeper
+───╯

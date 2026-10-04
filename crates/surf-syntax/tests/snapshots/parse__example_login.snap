@@ -1,0 +1,192 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Config:
+      kind:
+        name: browser
+        span:
+          start: 0
+          end: 7
+      alias: ~
+      props:
+        - key:
+            name: virtual
+            span:
+              start: 13
+              end: 20
+          value:
+            kind:
+              Bool: true
+            span:
+              start: 22
+              end: 26
+          span:
+            start: 13
+            end: 26
+      span:
+        start: 0
+        end: 26
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Method:
+              receiver:
+                kind:
+                  Ident:
+                    name: page
+                    span:
+                      start: 28
+                      end: 32
+                span:
+                  start: 28
+                  end: 32
+              name:
+                name: goto
+                span:
+                  start: 33
+                  end: 37
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: "https://example.com/login"
+                    span:
+                      start: 38
+                      end: 65
+                  span:
+                    start: 38
+                    end: 65
+          span:
+            start: 28
+            end: 66
+      span:
+        start: 28
+        end: 66
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: type
+                    span:
+                      start: 67
+                      end: 71
+                span:
+                  start: 67
+                  end: 71
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: "#username"
+                    span:
+                      start: 72
+                      end: 83
+                  span:
+                    start: 72
+                    end: 83
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: user
+                    span:
+                      start: 85
+                      end: 91
+                  span:
+                    start: 85
+                    end: 91
+          span:
+            start: 67
+            end: 92
+      span:
+        start: 67
+        end: 92
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: type
+                    span:
+                      start: 93
+                      end: 97
+                span:
+                  start: 93
+                  end: 97
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: "#password"
+                    span:
+                      start: 98
+                      end: 109
+                  span:
+                    start: 98
+                    end: 109
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: pass
+                    span:
+                      start: 111
+                      end: 117
+                  span:
+                    start: 111
+                    end: 117
+          span:
+            start: 93
+            end: 118
+      span:
+        start: 93
+        end: 118
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: click
+                    span:
+                      start: 119
+                      end: 124
+                span:
+                  start: 119
+                  end: 124
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: "#submit"
+                    span:
+                      start: 125
+                      end: 134
+                  span:
+                    start: 125
+                    end: 134
+          span:
+            start: 119
+            end: 135
+      span:
+        start: 119
+        end: 135
+span:
+  start: 0
+  end: 136

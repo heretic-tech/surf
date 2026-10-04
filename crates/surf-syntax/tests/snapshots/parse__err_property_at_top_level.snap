@@ -1,0 +1,22 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_property_at_top_level\", \".surf\"), src)"
+---
+[31merror:[0m unexpected property line `headless:`
+   ╭─[ err_property_at_top_level.surf:1:1 ]
+   │
+ 1 │ headless: true
+   │ ────┬────  
+   │     ╰────── not a statement
+   │ 
+   │ Help: `headless` is a browser option; put it inside a `browser:` block
+───╯
+[31merror:[0m unexpected property line `x:`
+   ╭─[ err_property_at_top_level.surf:2:1 ]
+   │
+ 2 │ x: 1
+   │ ─┬  
+   │  ╰── not a statement
+   │ 
+   │ Help: `key: value` lines are only allowed in a `browser:` block and at the start of task / actor / supervisor / `parallel for` bodies
+───╯

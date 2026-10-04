@@ -1,0 +1,478 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: double
+                span:
+                  start: 0
+                  end: 6
+            span:
+              start: 0
+              end: 6
+          value:
+            kind:
+              Lambda:
+                params:
+                  - name:
+                      name: x
+                      span:
+                        start: 12
+                        end: 13
+                    default: ~
+                    span:
+                      start: 12
+                      end: 13
+                body:
+                  Expr:
+                    kind:
+                      Binary:
+                        op: Mul
+                        lhs:
+                          kind:
+                            Ident:
+                              name: x
+                              span:
+                                start: 16
+                                end: 17
+                          span:
+                            start: 16
+                            end: 17
+                        rhs:
+                          kind:
+                            Int: 2
+                          span:
+                            start: 20
+                            end: 21
+                    span:
+                      start: 16
+                      end: 21
+            span:
+              start: 9
+              end: 21
+      span:
+        start: 0
+        end: 21
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: apply
+                span:
+                  start: 22
+                  end: 27
+            span:
+              start: 22
+              end: 27
+          value:
+            kind:
+              Lambda:
+                params:
+                  - name:
+                      name: f
+                      span:
+                        start: 33
+                        end: 34
+                    default: ~
+                    span:
+                      start: 33
+                      end: 34
+                  - name:
+                      name: v
+                      span:
+                        start: 36
+                        end: 37
+                    default: ~
+                    span:
+                      start: 36
+                      end: 37
+                body:
+                  Expr:
+                    kind:
+                      Call:
+                        callee:
+                          kind:
+                            Ident:
+                              name: f
+                              span:
+                                start: 40
+                                end: 41
+                          span:
+                            start: 40
+                            end: 41
+                        args:
+                          - name: ~
+                            value:
+                              kind:
+                                Ident:
+                                  name: v
+                                  span:
+                                    start: 42
+                                    end: 43
+                              span:
+                                start: 42
+                                end: 43
+                            span:
+                              start: 42
+                              end: 43
+                    span:
+                      start: 40
+                      end: 44
+            span:
+              start: 30
+              end: 44
+      span:
+        start: 22
+        end: 44
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: print
+                    span:
+                      start: 45
+                      end: 50
+                span:
+                  start: 45
+                  end: 50
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Call:
+                        callee:
+                          kind:
+                            Ident:
+                              name: apply
+                              span:
+                                start: 51
+                                end: 56
+                          span:
+                            start: 51
+                            end: 56
+                        args:
+                          - name: ~
+                            value:
+                              kind:
+                                Ident:
+                                  name: double
+                                  span:
+                                    start: 57
+                                    end: 63
+                              span:
+                                start: 57
+                                end: 63
+                            span:
+                              start: 57
+                              end: 63
+                          - name: ~
+                            value:
+                              kind:
+                                Int: 4
+                              span:
+                                start: 65
+                                end: 66
+                            span:
+                              start: 65
+                              end: 66
+                    span:
+                      start: 51
+                      end: 67
+                  span:
+                    start: 51
+                    end: 67
+          span:
+            start: 45
+            end: 68
+      span:
+        start: 45
+        end: 68
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: handler
+                span:
+                  start: 69
+                  end: 76
+            span:
+              start: 69
+              end: 76
+          value:
+            kind:
+              Lambda:
+                params:
+                  - name:
+                      name: e
+                      span:
+                        start: 82
+                        end: 83
+                    default: ~
+                    span:
+                      start: 82
+                      end: 83
+                body:
+                  Block:
+                    stmts:
+                      - kind:
+                          Expr:
+                            kind:
+                              Call:
+                                callee:
+                                  kind:
+                                    Ident:
+                                      name: print
+                                      span:
+                                        start: 90
+                                        end: 95
+                                  span:
+                                    start: 90
+                                    end: 95
+                                args:
+                                  - name: ~
+                                    value:
+                                      kind:
+                                        Ident:
+                                          name: e
+                                          span:
+                                            start: 96
+                                            end: 97
+                                      span:
+                                        start: 96
+                                        end: 97
+                                    span:
+                                      start: 96
+                                      end: 97
+                            span:
+                              start: 90
+                              end: 98
+                        span:
+                          start: 90
+                          end: 98
+                      - kind:
+                          Return:
+                            kind:
+                              Binary:
+                                op: Mul
+                                lhs:
+                                  kind:
+                                    Ident:
+                                      name: e
+                                      span:
+                                        start: 110
+                                        end: 111
+                                  span:
+                                    start: 110
+                                    end: 111
+                                rhs:
+                                  kind:
+                                    Int: 2
+                                  span:
+                                    start: 114
+                                    end: 115
+                            span:
+                              start: 110
+                              end: 115
+                        span:
+                          start: 103
+                          end: 115
+                    span:
+                      start: 90
+                      end: 115
+            span:
+              start: 79
+              end: 115
+      span:
+        start: 69
+        end: 115
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: zero
+                span:
+                  start: 116
+                  end: 120
+            span:
+              start: 116
+              end: 120
+          value:
+            kind:
+              Lambda:
+                params: []
+                body:
+                  Expr:
+                    kind:
+                      Field:
+                        receiver:
+                          kind:
+                            Ident:
+                              name: document
+                              span:
+                                start: 129
+                                end: 137
+                          span:
+                            start: 129
+                            end: 137
+                        name:
+                          name: cookie
+                          span:
+                            start: 138
+                            end: 144
+                    span:
+                      start: 129
+                      end: 144
+            span:
+              start: 123
+              end: 144
+      span:
+        start: 116
+        end: 144
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: eval
+                    span:
+                      start: 145
+                      end: 149
+                span:
+                  start: 145
+                  end: 149
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Lambda:
+                        params: []
+                        body:
+                          Expr:
+                            kind:
+                              Field:
+                                receiver:
+                                  kind:
+                                    Ident:
+                                      name: document
+                                      span:
+                                        start: 156
+                                        end: 164
+                                  span:
+                                    start: 156
+                                    end: 164
+                                name:
+                                  name: title
+                                  span:
+                                    start: 165
+                                    end: 170
+                            span:
+                              start: 156
+                              end: 170
+                    span:
+                      start: 150
+                      end: 170
+                  span:
+                    start: 150
+                    end: 170
+          span:
+            start: 145
+            end: 171
+      span:
+        start: 145
+        end: 171
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: withdef
+                span:
+                  start: 172
+                  end: 179
+            span:
+              start: 172
+              end: 179
+          value:
+            kind:
+              Lambda:
+                params:
+                  - name:
+                      name: a
+                      span:
+                        start: 185
+                        end: 186
+                    default: ~
+                    span:
+                      start: 185
+                      end: 186
+                  - name:
+                      name: b
+                      span:
+                        start: 188
+                        end: 189
+                    default:
+                      kind:
+                        Int: 2
+                      span:
+                        start: 191
+                        end: 192
+                    span:
+                      start: 188
+                      end: 192
+                body:
+                  Expr:
+                    kind:
+                      Binary:
+                        op: Add
+                        lhs:
+                          kind:
+                            Ident:
+                              name: a
+                              span:
+                                start: 195
+                                end: 196
+                          span:
+                            start: 195
+                            end: 196
+                        rhs:
+                          kind:
+                            Ident:
+                              name: b
+                              span:
+                                start: 199
+                                end: 200
+                          span:
+                            start: 199
+                            end: 200
+                    span:
+                      start: 195
+                      end: 200
+            span:
+              start: 182
+              end: 200
+      span:
+        start: 172
+        end: 200
+span:
+  start: 0
+  end: 201

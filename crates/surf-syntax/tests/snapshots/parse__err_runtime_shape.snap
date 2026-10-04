@@ -1,0 +1,13 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "d.render(\"examples/login.surf\", src, false)"
+---
+[31merror:[0m element not visible after 30s (selector: #submit) [DOM.getContentQuads]
+   ╭─[ examples/login.surf:7:1 ]
+   │
+ 7 │ click("#submit")
+   │ ────────┬───────  
+   │         ╰───────── selector: #submit
+   │ 
+   │ Note: CDP method: DOM.getContentQuads
+───╯

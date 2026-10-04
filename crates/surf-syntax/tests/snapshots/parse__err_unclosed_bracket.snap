@@ -1,0 +1,13 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_unclosed_bracket\", \".surf\"), src)"
+---
+[31merror:[0m unclosed `[`
+   ╭─[ err_unclosed_bracket.surf:1:6 ]
+   │
+ 1 │ xs = [1, 2
+   │      ┬  
+   │      ╰── opened here
+   │ 
+   │ Help: add a matching `]`
+───╯

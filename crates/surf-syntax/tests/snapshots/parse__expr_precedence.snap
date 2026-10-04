@@ -1,0 +1,757 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: a
+                span:
+                  start: 0
+                  end: 1
+            span:
+              start: 0
+              end: 1
+          value:
+            kind:
+              Binary:
+                op: Sub
+                lhs:
+                  kind:
+                    Binary:
+                      op: Add
+                      lhs:
+                        kind:
+                          Int: 1
+                        span:
+                          start: 4
+                          end: 5
+                      rhs:
+                        kind:
+                          Binary:
+                            op: Mul
+                            lhs:
+                              kind:
+                                Int: 2
+                              span:
+                                start: 8
+                                end: 9
+                            rhs:
+                              kind:
+                                Int: 3
+                              span:
+                                start: 12
+                                end: 13
+                        span:
+                          start: 8
+                          end: 13
+                  span:
+                    start: 4
+                    end: 13
+                rhs:
+                  kind:
+                    Binary:
+                      op: Rem
+                      lhs:
+                        kind:
+                          Binary:
+                            op: Div
+                            lhs:
+                              kind:
+                                Int: 4
+                              span:
+                                start: 16
+                                end: 17
+                            rhs:
+                              kind:
+                                Int: 5
+                              span:
+                                start: 20
+                                end: 21
+                        span:
+                          start: 16
+                          end: 21
+                      rhs:
+                        kind:
+                          Int: 6
+                        span:
+                          start: 24
+                          end: 25
+                  span:
+                    start: 16
+                    end: 25
+            span:
+              start: 4
+              end: 25
+      span:
+        start: 0
+        end: 25
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: b
+                span:
+                  start: 26
+                  end: 27
+            span:
+              start: 26
+              end: 27
+          value:
+            kind:
+              Binary:
+                op: Mul
+                lhs:
+                  kind:
+                    Unary:
+                      op: Neg
+                      expr:
+                        kind:
+                          Ident:
+                            name: x
+                            span:
+                              start: 31
+                              end: 32
+                        span:
+                          start: 31
+                          end: 32
+                  span:
+                    start: 30
+                    end: 32
+                rhs:
+                  kind:
+                    Ident:
+                      name: y
+                      span:
+                        start: 35
+                        end: 36
+                  span:
+                    start: 35
+                    end: 36
+            span:
+              start: 30
+              end: 36
+      span:
+        start: 26
+        end: 36
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: c
+                span:
+                  start: 37
+                  end: 38
+            span:
+              start: 37
+              end: 38
+          value:
+            kind:
+              Unary:
+                op: Neg
+                expr:
+                  kind:
+                    Index:
+                      receiver:
+                        kind:
+                          Field:
+                            receiver:
+                              kind:
+                                Ident:
+                                  name: x
+                                  span:
+                                    start: 42
+                                    end: 43
+                              span:
+                                start: 42
+                                end: 43
+                            name:
+                              name: y
+                              span:
+                                start: 44
+                                end: 45
+                        span:
+                          start: 42
+                          end: 45
+                      index:
+                        kind:
+                          Int: 0
+                        span:
+                          start: 46
+                          end: 47
+                  span:
+                    start: 42
+                    end: 48
+            span:
+              start: 41
+              end: 48
+      span:
+        start: 37
+        end: 48
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: d
+                span:
+                  start: 49
+                  end: 50
+            span:
+              start: 49
+              end: 50
+          value:
+            kind:
+              Binary:
+                op: Or
+                lhs:
+                  kind:
+                    Unary:
+                      op: Not
+                      expr:
+                        kind:
+                          Binary:
+                            op: Eq
+                            lhs:
+                              kind:
+                                Ident:
+                                  name: a
+                                  span:
+                                    start: 57
+                                    end: 58
+                              span:
+                                start: 57
+                                end: 58
+                            rhs:
+                              kind:
+                                Ident:
+                                  name: b
+                                  span:
+                                    start: 62
+                                    end: 63
+                              span:
+                                start: 62
+                                end: 63
+                        span:
+                          start: 57
+                          end: 63
+                  span:
+                    start: 53
+                    end: 63
+                rhs:
+                  kind:
+                    Binary:
+                      op: And
+                      lhs:
+                        kind:
+                          Ident:
+                            name: c
+                            span:
+                              start: 67
+                              end: 68
+                        span:
+                          start: 67
+                          end: 68
+                      rhs:
+                        kind:
+                          Ident:
+                            name: d
+                            span:
+                              start: 73
+                              end: 74
+                        span:
+                          start: 73
+                          end: 74
+                  span:
+                    start: 67
+                    end: 74
+            span:
+              start: 53
+              end: 74
+      span:
+        start: 49
+        end: 74
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: e
+                span:
+                  start: 75
+                  end: 76
+            span:
+              start: 75
+              end: 76
+          value:
+            kind:
+              Binary:
+                op: Or
+                lhs:
+                  kind:
+                    Binary:
+                      op: Or
+                      lhs:
+                        kind:
+                          Binary:
+                            op: And
+                            lhs:
+                              kind:
+                                Binary:
+                                  op: Lt
+                                  lhs:
+                                    kind:
+                                      Ident:
+                                        name: a
+                                        span:
+                                          start: 79
+                                          end: 80
+                                    span:
+                                      start: 79
+                                      end: 80
+                                  rhs:
+                                    kind:
+                                      Ident:
+                                        name: b
+                                        span:
+                                          start: 83
+                                          end: 84
+                                    span:
+                                      start: 83
+                                      end: 84
+                              span:
+                                start: 79
+                                end: 84
+                            rhs:
+                              kind:
+                                Binary:
+                                  op: LtEq
+                                  lhs:
+                                    kind:
+                                      Ident:
+                                        name: b
+                                        span:
+                                          start: 89
+                                          end: 90
+                                    span:
+                                      start: 89
+                                      end: 90
+                                  rhs:
+                                    kind:
+                                      Ident:
+                                        name: c
+                                        span:
+                                          start: 94
+                                          end: 95
+                                    span:
+                                      start: 94
+                                      end: 95
+                              span:
+                                start: 89
+                                end: 95
+                        span:
+                          start: 79
+                          end: 95
+                      rhs:
+                        kind:
+                          Binary:
+                            op: And
+                            lhs:
+                              kind:
+                                Binary:
+                                  op: GtEq
+                                  lhs:
+                                    kind:
+                                      Ident:
+                                        name: a
+                                        span:
+                                          start: 99
+                                          end: 100
+                                    span:
+                                      start: 99
+                                      end: 100
+                                  rhs:
+                                    kind:
+                                      Ident:
+                                        name: b
+                                        span:
+                                          start: 104
+                                          end: 105
+                                    span:
+                                      start: 104
+                                      end: 105
+                              span:
+                                start: 99
+                                end: 105
+                            rhs:
+                              kind:
+                                Binary:
+                                  op: NotEq
+                                  lhs:
+                                    kind:
+                                      Ident:
+                                        name: a
+                                        span:
+                                          start: 110
+                                          end: 111
+                                    span:
+                                      start: 110
+                                      end: 111
+                                  rhs:
+                                    kind:
+                                      Ident:
+                                        name: b
+                                        span:
+                                          start: 115
+                                          end: 116
+                                    span:
+                                      start: 115
+                                      end: 116
+                              span:
+                                start: 110
+                                end: 116
+                        span:
+                          start: 99
+                          end: 116
+                  span:
+                    start: 79
+                    end: 116
+                rhs:
+                  kind:
+                    Binary:
+                      op: And
+                      lhs:
+                        kind:
+                          Binary:
+                            op: Eq
+                            lhs:
+                              kind:
+                                Ident:
+                                  name: a
+                                  span:
+                                    start: 120
+                                    end: 121
+                              span:
+                                start: 120
+                                end: 121
+                            rhs:
+                              kind:
+                                Ident:
+                                  name: b
+                                  span:
+                                    start: 125
+                                    end: 126
+                              span:
+                                start: 125
+                                end: 126
+                        span:
+                          start: 120
+                          end: 126
+                      rhs:
+                        kind:
+                          Binary:
+                            op: Gt
+                            lhs:
+                              kind:
+                                Ident:
+                                  name: a
+                                  span:
+                                    start: 131
+                                    end: 132
+                              span:
+                                start: 131
+                                end: 132
+                            rhs:
+                              kind:
+                                Ident:
+                                  name: b
+                                  span:
+                                    start: 135
+                                    end: 136
+                              span:
+                                start: 135
+                                end: 136
+                        span:
+                          start: 131
+                          end: 136
+                  span:
+                    start: 120
+                    end: 136
+            span:
+              start: 79
+              end: 136
+      span:
+        start: 75
+        end: 136
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: f
+                span:
+                  start: 137
+                  end: 138
+            span:
+              start: 137
+              end: 138
+          value:
+            kind:
+              Range:
+                start:
+                  kind:
+                    Int: 1
+                  span:
+                    start: 141
+                    end: 142
+                end:
+                  kind:
+                    Binary:
+                      op: Add
+                      lhs:
+                        kind:
+                          Ident:
+                            name: n
+                            span:
+                              start: 144
+                              end: 145
+                        span:
+                          start: 144
+                          end: 145
+                      rhs:
+                        kind:
+                          Int: 1
+                        span:
+                          start: 148
+                          end: 149
+                  span:
+                    start: 144
+                    end: 149
+                inclusive: false
+            span:
+              start: 141
+              end: 149
+      span:
+        start: 137
+        end: 149
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: g
+                span:
+                  start: 150
+                  end: 151
+            span:
+              start: 150
+              end: 151
+          value:
+            kind:
+              Range:
+                start:
+                  kind:
+                    Int: 1
+                  span:
+                    start: 154
+                    end: 155
+                end:
+                  kind:
+                    Int: 3
+                  span:
+                    start: 158
+                    end: 159
+                inclusive: true
+            span:
+              start: 154
+              end: 159
+      span:
+        start: 150
+        end: 159
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: h
+                span:
+                  start: 160
+                  end: 161
+            span:
+              start: 160
+              end: 161
+          value:
+            kind:
+              Binary:
+                op: Mul
+                lhs:
+                  kind:
+                    Binary:
+                      op: Add
+                      lhs:
+                        kind:
+                          Int: 1
+                        span:
+                          start: 165
+                          end: 166
+                      rhs:
+                        kind:
+                          Int: 2
+                        span:
+                          start: 169
+                          end: 170
+                  span:
+                    start: 164
+                    end: 171
+                rhs:
+                  kind:
+                    Int: 3
+                  span:
+                    start: 174
+                    end: 175
+            span:
+              start: 164
+              end: 175
+      span:
+        start: 160
+        end: 175
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: i
+                span:
+                  start: 176
+                  end: 177
+            span:
+              start: 176
+              end: 177
+          value:
+            kind:
+              Binary:
+                op: Or
+                lhs:
+                  kind: Nil
+                  span:
+                    start: 180
+                    end: 183
+                rhs:
+                  kind:
+                    Int: 3
+                  span:
+                    start: 187
+                    end: 188
+            span:
+              start: 180
+              end: 188
+      span:
+        start: 176
+        end: 188
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: j
+                span:
+                  start: 189
+                  end: 190
+            span:
+              start: 189
+              end: 190
+          value:
+            kind:
+              Binary:
+                op: Sub
+                lhs:
+                  kind:
+                    Ident:
+                      name: a
+                      span:
+                        start: 193
+                        end: 194
+                  span:
+                    start: 193
+                    end: 194
+                rhs:
+                  kind:
+                    Unary:
+                      op: Neg
+                      expr:
+                        kind:
+                          Ident:
+                            name: b
+                            span:
+                              start: 198
+                              end: 199
+                        span:
+                          start: 198
+                          end: 199
+                  span:
+                    start: 197
+                    end: 199
+            span:
+              start: 193
+              end: 199
+      span:
+        start: 189
+        end: 199
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: k
+                span:
+                  start: 200
+                  end: 201
+            span:
+              start: 200
+              end: 201
+          value:
+            kind:
+              Unary:
+                op: Not
+                expr:
+                  kind:
+                    Unary:
+                      op: Not
+                      expr:
+                        kind:
+                          Ident:
+                            name: a
+                            span:
+                              start: 212
+                              end: 213
+                        span:
+                          start: 212
+                          end: 213
+                  span:
+                    start: 208
+                    end: 213
+            span:
+              start: 204
+              end: 213
+      span:
+        start: 200
+        end: 213
+span:
+  start: 0
+  end: 214

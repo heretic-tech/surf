@@ -1,0 +1,541 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Actor:
+      name:
+        name: Scout
+        span:
+          start: 6
+          end: 11
+      params: []
+      props: []
+      body:
+        stmts:
+          - kind:
+              Expr:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: goto
+                          span:
+                            start: 19
+                            end: 23
+                      span:
+                        start: 19
+                        end: 23
+                    args:
+                      - name: ~
+                        value:
+                          kind:
+                            Str:
+                              - Lit: "https://example.com"
+                          span:
+                            start: 24
+                            end: 45
+                        span:
+                          start: 24
+                          end: 45
+                span:
+                  start: 19
+                  end: 46
+            span:
+              start: 19
+              end: 46
+          - kind:
+              Expr:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: broadcast
+                          span:
+                            start: 51
+                            end: 60
+                      span:
+                        start: 51
+                        end: 60
+                    args:
+                      - name: ~
+                        value:
+                          kind:
+                            Map:
+                              - - Ident:
+                                    name: kind
+                                    span:
+                                      start: 62
+                                      end: 66
+                                - kind:
+                                    Str:
+                                      - Lit: token
+                                  span:
+                                    start: 68
+                                    end: 75
+                              - - Ident:
+                                    name: value
+                                    span:
+                                      start: 77
+                                      end: 82
+                                - kind:
+                                    Call:
+                                      callee:
+                                        kind:
+                                          Ident:
+                                            name: eval
+                                            span:
+                                              start: 84
+                                              end: 88
+                                        span:
+                                          start: 84
+                                          end: 88
+                                      args:
+                                        - name: ~
+                                          value:
+                                            kind:
+                                              Str:
+                                                - Lit: document.title
+                                            span:
+                                              start: 89
+                                              end: 105
+                                          span:
+                                            start: 89
+                                            end: 105
+                                  span:
+                                    start: 84
+                                    end: 106
+                          span:
+                            start: 61
+                            end: 107
+                        span:
+                          start: 61
+                          end: 107
+                span:
+                  start: 51
+                  end: 108
+            span:
+              start: 51
+              end: 108
+        span:
+          start: 19
+          end: 108
+      span:
+        start: 0
+        end: 108
+  - Actor:
+      name:
+        name: Worker
+        span:
+          start: 115
+          end: 121
+      params:
+        - name:
+            name: n
+            span:
+              start: 122
+              end: 123
+          default: ~
+          span:
+            start: 122
+            end: 123
+      props:
+        - key:
+            name: timeout
+            span:
+              start: 130
+              end: 137
+          value:
+            kind:
+              Duration:
+                secs: 30
+                nanos: 0
+            span:
+              start: 139
+              end: 142
+          span:
+            start: 130
+            end: 142
+      body:
+        stmts:
+          - kind:
+              Assign:
+                target:
+                  kind:
+                    Ident:
+                      name: msg
+                      span:
+                        start: 147
+                        end: 150
+                  span:
+                    start: 147
+                    end: 150
+                value:
+                  kind:
+                    Call:
+                      callee:
+                        kind:
+                          Ident:
+                            name: receive
+                            span:
+                              start: 153
+                              end: 160
+                        span:
+                          start: 153
+                          end: 160
+                      args:
+                        - name:
+                            name: timeout
+                            span:
+                              start: 161
+                              end: 168
+                          value:
+                            kind:
+                              Duration:
+                                secs: 30
+                                nanos: 0
+                            span:
+                              start: 170
+                              end: 173
+                          span:
+                            start: 161
+                            end: 173
+                  span:
+                    start: 153
+                    end: 174
+            span:
+              start: 147
+              end: 174
+          - kind:
+              If:
+                branches:
+                  - - kind:
+                        Binary:
+                          op: Eq
+                          lhs:
+                            kind:
+                              Ident:
+                                name: msg
+                                span:
+                                  start: 205
+                                  end: 208
+                            span:
+                              start: 205
+                              end: 208
+                          rhs:
+                            kind: Nil
+                            span:
+                              start: 212
+                              end: 215
+                      span:
+                        start: 205
+                        end: 215
+                    - stmts:
+                        - kind:
+                            Return: ~
+                          span:
+                            start: 225
+                            end: 231
+                      span:
+                        start: 225
+                        end: 231
+                else_block: ~
+            span:
+              start: 202
+              end: 231
+          - kind:
+              Expr:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: goto
+                          span:
+                            start: 236
+                            end: 240
+                      span:
+                        start: 236
+                        end: 240
+                    args:
+                      - name: ~
+                        value:
+                          kind:
+                            Str:
+                              - Lit: "https://example.com/?t="
+                              - Expr:
+                                  kind:
+                                    Field:
+                                      receiver:
+                                        kind:
+                                          Ident:
+                                            name: msg
+                                            span:
+                                              start: 266
+                                              end: 269
+                                        span:
+                                          start: 266
+                                          end: 269
+                                      name:
+                                        name: value
+                                        span:
+                                          start: 270
+                                          end: 275
+                                  span:
+                                    start: 266
+                                    end: 275
+                          span:
+                            start: 241
+                            end: 277
+                        span:
+                          start: 241
+                          end: 277
+                span:
+                  start: 236
+                  end: 278
+            span:
+              start: 236
+              end: 278
+          - kind:
+              Emit:
+                kind:
+                  Map:
+                    - - Ident:
+                          name: worker
+                          span:
+                            start: 289
+                            end: 295
+                      - kind:
+                          Ident:
+                            name: n
+                            span:
+                              start: 297
+                              end: 298
+                        span:
+                          start: 297
+                          end: 298
+                    - - Ident:
+                          name: id
+                          span:
+                            start: 300
+                            end: 302
+                      - kind:
+                          Field:
+                            receiver:
+                              kind:
+                                Ident:
+                                  name: self
+                                  span:
+                                    start: 304
+                                    end: 308
+                              span:
+                                start: 304
+                                end: 308
+                            name:
+                              name: id
+                              span:
+                                start: 309
+                                end: 311
+                        span:
+                          start: 304
+                          end: 311
+                span:
+                  start: 288
+                  end: 312
+            span:
+              start: 283
+              end: 312
+        span:
+          start: 147
+          end: 312
+      span:
+        start: 109
+        end: 312
+  - Actor:
+      name:
+        name: Listener
+        span:
+          start: 319
+          end: 327
+      params: []
+      props: []
+      body:
+        stmts:
+          - kind:
+              Handler:
+                event:
+                  name: message
+                  span:
+                    start: 338
+                    end: 345
+                args: []
+                body:
+                  stmts:
+                    - kind:
+                        Expr:
+                          kind:
+                            Call:
+                              callee:
+                                kind:
+                                  Ident:
+                                    name: print
+                                    span:
+                                      start: 355
+                                      end: 360
+                                span:
+                                  start: 355
+                                  end: 360
+                              args:
+                                - name: ~
+                                  value:
+                                    kind:
+                                      Ident:
+                                        name: event
+                                        span:
+                                          start: 361
+                                          end: 366
+                                    span:
+                                      start: 361
+                                      end: 366
+                                  span:
+                                    start: 361
+                                    end: 366
+                          span:
+                            start: 355
+                            end: 367
+                      span:
+                        start: 355
+                        end: 367
+                  span:
+                    start: 355
+                    end: 367
+                span:
+                  start: 335
+                  end: 367
+            span:
+              start: 335
+              end: 367
+          - kind:
+              Expr:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: wait_for_message
+                          span:
+                            start: 372
+                            end: 388
+                      span:
+                        start: 372
+                        end: 388
+                    args: []
+                span:
+                  start: 372
+                  end: 390
+            span:
+              start: 372
+              end: 390
+        span:
+          start: 335
+          end: 390
+      span:
+        start: 313
+        end: 390
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: send
+                    span:
+                      start: 391
+                      end: 395
+                span:
+                  start: 391
+                  end: 395
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Ident:
+                        name: ref
+                        span:
+                          start: 396
+                          end: 399
+                    span:
+                      start: 396
+                      end: 399
+                  span:
+                    start: 396
+                    end: 399
+                - name: ~
+                  value:
+                    kind:
+                      Map:
+                        - - Ident:
+                              name: a
+                              span:
+                                start: 402
+                                end: 403
+                          - kind:
+                              Int: 1
+                            span:
+                              start: 405
+                              end: 406
+                    span:
+                      start: 401
+                      end: 407
+                  span:
+                    start: 401
+                    end: 407
+          span:
+            start: 391
+            end: 408
+      span:
+        start: 391
+        end: 408
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: broadcast
+                    span:
+                      start: 409
+                      end: 418
+                span:
+                  start: 409
+                  end: 418
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Ident:
+                        name: msg
+                        span:
+                          start: 419
+                          end: 422
+                    span:
+                      start: 419
+                      end: 422
+                  span:
+                    start: 419
+                    end: 422
+          span:
+            start: 409
+            end: 423
+      span:
+        start: 409
+        end: 423
+span:
+  start: 0
+  end: 424

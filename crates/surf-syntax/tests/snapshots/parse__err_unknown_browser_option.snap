@@ -1,0 +1,26 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_unknown_browser_option\", \".surf\"), src)"
+---
+[31merror:[0m unknown browser option `headles`
+   ╭─[ err_unknown_browser_option.surf:2:5 ]
+   │
+ 2 │     headles: true
+   │     ───┬───  
+   │        ╰───── here
+   │ 
+   │ Help: did you mean `headless`?
+───╯
+[31merror:[0m duplicate browser option `proxy`
+   ╭─[ err_unknown_browser_option.surf:4:5 ]
+   │
+ 4 │     proxy: "y"
+   │     ──┬──  
+   │       ╰──── here
+   │
+   ├─[ err_unknown_browser_option.surf:4:5 ]
+   │
+ 3 │     proxy: "x"
+   │     ──┬──  
+   │       ╰──── first set here
+───╯

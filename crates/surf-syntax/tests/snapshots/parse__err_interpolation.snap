@@ -1,0 +1,22 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_interpolation\", \".surf\"), src)"
+---
+[31merror:[0m unclosed `{` in string interpolation
+   ╭─[ err_interpolation.surf:2:13 ]
+   │
+ 2 │ print("open {x")
+   │             ┬  
+   │             ╰── interpolation starts here
+   │ 
+   │ Help: close the `{expr}` with `}` before the end of the line, or write `\{` for a literal brace
+───╯
+[31merror:[0m empty interpolation `{}`
+   ╭─[ err_interpolation.surf:3:8 ]
+   │
+ 3 │ print("{}")
+   │        ─┬  
+   │         ╰── here
+   │ 
+   │ Help: write an expression inside the braces, or `\{\}` for literal braces
+───╯

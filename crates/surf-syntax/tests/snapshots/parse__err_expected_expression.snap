@@ -1,0 +1,25 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_expected_expression\", \".surf\"), src)"
+---
+[31merror:[0m expected an expression, found end of line
+   ╭─[ err_expected_expression.surf:1:5 ]
+   │
+ 1 │ x =
+   │     ┬  
+   │     ╰── expected an expression
+───╯
+[31merror:[0m expected an expression, found end of line
+   ╭─[ err_expected_expression.surf:2:8 ]
+   │
+ 2 │ y = 1 +
+   │        ┬  
+   │        ╰── expected an expression
+───╯
+[31merror:[0m expected an expression, found `*`
+   ╭─[ err_expected_expression.surf:3:5 ]
+   │
+ 3 │ z = * 2
+   │     ┬  
+   │     ╰── expected an expression
+───╯

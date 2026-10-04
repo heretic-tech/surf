@@ -1,0 +1,316 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Task:
+      name:
+        name: fetch
+        span:
+          start: 5
+          end: 10
+      params:
+        - name:
+            name: url
+            span:
+              start: 11
+              end: 14
+          default: ~
+          span:
+            start: 11
+            end: 14
+      props:
+        - key:
+            name: retry
+            span:
+              start: 21
+              end: 26
+          value:
+            kind:
+              Int: 5
+            span:
+              start: 28
+              end: 29
+          span:
+            start: 21
+            end: 29
+        - key:
+            name: on_fail
+            span:
+              start: 34
+              end: 41
+          value:
+            kind:
+              Call:
+                callee:
+                  kind:
+                    Ident:
+                      name: shift_proxy
+                      span:
+                        start: 43
+                        end: 54
+                  span:
+                    start: 43
+                    end: 54
+                args: []
+            span:
+              start: 43
+              end: 56
+          span:
+            start: 34
+            end: 56
+        - key:
+            name: timeout
+            span:
+              start: 61
+              end: 68
+          value:
+            kind:
+              Duration:
+                secs: 60
+                nanos: 0
+            span:
+              start: 70
+              end: 73
+          span:
+            start: 61
+            end: 73
+        - key:
+            name: fresh
+            span:
+              start: 78
+              end: 83
+          value:
+            kind:
+              Bool: true
+            span:
+              start: 85
+              end: 89
+          span:
+            start: 78
+            end: 89
+      body:
+        stmts:
+          - kind:
+              Expr:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: goto
+                          span:
+                            start: 94
+                            end: 98
+                      span:
+                        start: 94
+                        end: 98
+                    args:
+                      - name: ~
+                        value:
+                          kind:
+                            Ident:
+                              name: url
+                              span:
+                                start: 99
+                                end: 102
+                          span:
+                            start: 99
+                            end: 102
+                        span:
+                          start: 99
+                          end: 102
+                span:
+                  start: 94
+                  end: 103
+            span:
+              start: 94
+              end: 103
+          - kind:
+              Return:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: html
+                          span:
+                            start: 115
+                            end: 119
+                      span:
+                        start: 115
+                        end: 119
+                    args:
+                      - name: ~
+                        value:
+                          kind:
+                            Str:
+                              - Lit: body
+                          span:
+                            start: 120
+                            end: 126
+                        span:
+                          start: 120
+                          end: 126
+                span:
+                  start: 115
+                  end: 127
+            span:
+              start: 108
+              end: 127
+        span:
+          start: 94
+          end: 127
+      span:
+        start: 0
+        end: 127
+  - Task:
+      name:
+        name: plain
+        span:
+          start: 133
+          end: 138
+      params:
+        - name:
+            name: a
+            span:
+              start: 139
+              end: 140
+          default: ~
+          span:
+            start: 139
+            end: 140
+        - name:
+            name: b
+            span:
+              start: 142
+              end: 143
+          default:
+            kind:
+              Int: 1
+            span:
+              start: 145
+              end: 146
+          span:
+            start: 142
+            end: 146
+      props: []
+      body:
+        stmts:
+          - kind:
+              Return:
+                kind:
+                  Binary:
+                    op: Add
+                    lhs:
+                      kind:
+                        Ident:
+                          name: a
+                          span:
+                            start: 160
+                            end: 161
+                      span:
+                        start: 160
+                        end: 161
+                    rhs:
+                      kind:
+                        Ident:
+                          name: b
+                          span:
+                            start: 164
+                            end: 165
+                      span:
+                        start: 164
+                        end: 165
+                span:
+                  start: 160
+                  end: 165
+            span:
+              start: 153
+              end: 165
+        span:
+          start: 153
+          end: 165
+      span:
+        start: 128
+        end: 165
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: fetch
+                    span:
+                      start: 166
+                      end: 171
+                span:
+                  start: 166
+                  end: 171
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Ident:
+                        name: u
+                        span:
+                          start: 172
+                          end: 173
+                    span:
+                      start: 172
+                      end: 173
+                  span:
+                    start: 172
+                    end: 173
+          span:
+            start: 166
+            end: 174
+      span:
+        start: 166
+        end: 174
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Spawn:
+              kind:
+                Call:
+                  callee:
+                    kind:
+                      Ident:
+                        name: fetch
+                        span:
+                          start: 181
+                          end: 186
+                    span:
+                      start: 181
+                      end: 186
+                  args:
+                    - name: ~
+                      value:
+                        kind:
+                          Ident:
+                            name: u
+                            span:
+                              start: 187
+                              end: 188
+                        span:
+                          start: 187
+                          end: 188
+                      span:
+                        start: 187
+                        end: 188
+              span:
+                start: 181
+                end: 189
+          span:
+            start: 175
+            end: 189
+      span:
+        start: 175
+        end: 189
+span:
+  start: 0
+  end: 190

@@ -1,0 +1,13 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_chained_comparison\", \".surf\"), src)"
+---
+[31merror:[0m comparison operators cannot be chained
+   ╭─[ err_chained_comparison.surf:1:12 ]
+   │
+ 1 │ ok = a < b < c
+   │            ┬  
+   │            ╰── second comparison
+   │ 
+   │ Help: write `a < b and b < c`
+───╯

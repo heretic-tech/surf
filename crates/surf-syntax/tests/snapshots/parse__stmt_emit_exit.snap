@@ -1,0 +1,145 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Stmt:
+      kind:
+        Emit:
+          kind:
+            Map:
+              - - Ident:
+                    name: text
+                    span:
+                      start: 6
+                      end: 10
+                - kind:
+                    Method:
+                      receiver:
+                        kind:
+                          Ident:
+                            name: a
+                            span:
+                              start: 12
+                              end: 13
+                        span:
+                          start: 12
+                          end: 13
+                      name:
+                        name: text
+                        span:
+                          start: 14
+                          end: 18
+                      args: []
+                  span:
+                    start: 12
+                    end: 20
+              - - Ident:
+                    name: href
+                    span:
+                      start: 22
+                      end: 26
+                - kind:
+                    Method:
+                      receiver:
+                        kind:
+                          Ident:
+                            name: a
+                            span:
+                              start: 28
+                              end: 29
+                        span:
+                          start: 28
+                          end: 29
+                      name:
+                        name: attr
+                        span:
+                          start: 30
+                          end: 34
+                      args:
+                        - name: ~
+                          value:
+                            kind:
+                              Str:
+                                - Lit: href
+                            span:
+                              start: 35
+                              end: 41
+                          span:
+                            start: 35
+                            end: 41
+                  span:
+                    start: 28
+                    end: 42
+          span:
+            start: 5
+            end: 43
+      span:
+        start: 0
+        end: 43
+  - Stmt:
+      kind:
+        Emit:
+          kind:
+            Int: 42
+          span:
+            start: 49
+            end: 51
+      span:
+        start: 44
+        end: 51
+  - Stmt:
+      kind:
+        Emit:
+          kind:
+            Ident:
+              name: x
+              span:
+                start: 57
+                end: 58
+          span:
+            start: 56
+            end: 59
+      span:
+        start: 52
+        end: 59
+  - Stmt:
+      kind:
+        If:
+          branches:
+            - - kind:
+                  Ident:
+                    name: done
+                    span:
+                      start: 63
+                      end: 67
+                span:
+                  start: 63
+                  end: 67
+              - stmts:
+                  - kind:
+                      Exit: ~
+                    span:
+                      start: 73
+                      end: 77
+                span:
+                  start: 73
+                  end: 77
+          else_block: ~
+      span:
+        start: 60
+        end: 77
+  - Stmt:
+      kind:
+        Exit:
+          kind:
+            Int: 1
+          span:
+            start: 83
+            end: 84
+      span:
+        start: 78
+        end: 85
+span:
+  start: 0
+  end: 86

@@ -1,0 +1,211 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Stmt:
+      kind:
+        Try:
+          body:
+            stmts:
+              - kind:
+                  Expr:
+                    kind:
+                      Call:
+                        callee:
+                          kind:
+                            Ident:
+                              name: click
+                              span:
+                                start: 9
+                                end: 14
+                          span:
+                            start: 9
+                            end: 14
+                        args:
+                          - name: ~
+                            value:
+                              kind:
+                                Str:
+                                  - Lit: "#maybe"
+                              span:
+                                start: 15
+                                end: 23
+                            span:
+                              start: 15
+                              end: 23
+                          - name:
+                              name: timeout
+                              span:
+                                start: 25
+                                end: 32
+                            value:
+                              kind:
+                                Duration:
+                                  secs: 2
+                                  nanos: 0
+                              span:
+                                start: 34
+                                end: 36
+                            span:
+                              start: 25
+                              end: 36
+                    span:
+                      start: 9
+                      end: 37
+                span:
+                  start: 9
+                  end: 37
+            span:
+              start: 9
+              end: 37
+          catch_var:
+            name: e
+            span:
+              start: 44
+              end: 45
+          catch_block:
+            stmts:
+              - kind:
+                  Expr:
+                    kind:
+                      Call:
+                        callee:
+                          kind:
+                            Ident:
+                              name: print
+                              span:
+                                start: 51
+                                end: 56
+                          span:
+                            start: 51
+                            end: 56
+                        args:
+                          - name: ~
+                            value:
+                              kind:
+                                Str:
+                                  - Lit: "no button: "
+                                  - Expr:
+                                      kind:
+                                        Field:
+                                          receiver:
+                                            kind:
+                                              Ident:
+                                                name: e
+                                                span:
+                                                  start: 70
+                                                  end: 71
+                                            span:
+                                              start: 70
+                                              end: 71
+                                          name:
+                                            name: message
+                                            span:
+                                              start: 72
+                                              end: 79
+                                      span:
+                                        start: 70
+                                        end: 79
+                              span:
+                                start: 57
+                                end: 81
+                            span:
+                              start: 57
+                              end: 81
+                    span:
+                      start: 51
+                      end: 82
+                span:
+                  start: 51
+                  end: 82
+            span:
+              start: 51
+              end: 82
+      span:
+        start: 0
+        end: 82
+  - Stmt:
+      kind:
+        Try:
+          body:
+            stmts:
+              - kind:
+                  Expr:
+                    kind:
+                      Call:
+                        callee:
+                          kind:
+                            Ident:
+                              name: fail
+                              span:
+                                start: 92
+                                end: 96
+                          span:
+                            start: 92
+                            end: 96
+                        args:
+                          - name: ~
+                            value:
+                              kind:
+                                Str:
+                                  - Lit: x
+                              span:
+                                start: 97
+                                end: 100
+                            span:
+                              start: 97
+                              end: 100
+                    span:
+                      start: 92
+                      end: 101
+                span:
+                  start: 92
+                  end: 101
+            span:
+              start: 92
+              end: 101
+          catch_var: ~
+          catch_block:
+            stmts:
+              - kind:
+                  Expr:
+                    kind:
+                      Call:
+                        callee:
+                          kind:
+                            Ident:
+                              name: print
+                              span:
+                                start: 113
+                                end: 118
+                          span:
+                            start: 113
+                            end: 118
+                        args:
+                          - name: ~
+                            value:
+                              kind:
+                                Str:
+                                  - Lit: ignored
+                              span:
+                                start: 119
+                                end: 128
+                            span:
+                              start: 119
+                              end: 128
+                    span:
+                      start: 113
+                      end: 129
+                span:
+                  start: 113
+                  end: 129
+            span:
+              start: 113
+              end: 129
+      span:
+        start: 83
+        end: 129
+span:
+  start: 0
+  end: 130

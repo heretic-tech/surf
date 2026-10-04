@@ -1,0 +1,13 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_unexpected_indent\", \".surf\"), src)"
+---
+[31merror:[0m unexpected indentation
+   ╭─[ err_unexpected_indent.surf:2:1 ]
+   │
+ 2 │     b()
+   │ ──┬─  
+   │   ╰─── this line is indented deeper than the previous one
+   │ 
+   │ Help: only a line ending in ':' opens a block
+───╯

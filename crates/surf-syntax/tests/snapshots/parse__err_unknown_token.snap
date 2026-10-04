@@ -1,0 +1,29 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_unknown_token\", \".surf\"), src)"
+---
+[31merror:[0m unexpected character `@`
+   ╭─[ err_unknown_token.surf:1:7 ]
+   │
+ 1 │ x = 1 @ 2
+   │       ┬  
+   │       ╰── here
+───╯
+[31merror:[0m unexpected character `&`
+   ╭─[ err_unknown_token.surf:2:7 ]
+   │
+ 2 │ y = a && b
+   │       ─┬  
+   │        ╰── here
+   │ 
+   │ Help: Surf spells `&&` as `and`
+───╯
+[31merror:[0m unexpected `'`
+   ╭─[ err_unknown_token.surf:3:5 ]
+   │
+ 3 │ z = 'c'
+   │     ┬  
+   │     ╰── here
+   │ 
+   │ Help: strings use double quotes: "…"
+───╯

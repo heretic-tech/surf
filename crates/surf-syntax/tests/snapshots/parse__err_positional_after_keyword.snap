@@ -1,0 +1,13 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_positional_after_keyword\", \".surf\"), src)"
+---
+[31merror:[0m positional argument after keyword argument
+   ╭─[ err_positional_after_keyword.surf:1:26 ]
+   │
+ 1 │ click("#a", timeout: 5s, 2)
+   │                          ┬  
+   │                          ╰── here
+   │ 
+   │ Help: keyword arguments (`name: value`) must come after all positional arguments
+───╯

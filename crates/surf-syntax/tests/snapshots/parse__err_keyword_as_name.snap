@@ -1,0 +1,22 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_keyword_as_name\", \".surf\"), src)"
+---
+[31merror:[0m `task` is a reserved keyword and cannot be used as a variable name
+   ╭─[ err_keyword_as_name.surf:1:6 ]
+   │
+ 1 │ task = 1
+   │      ┬  
+   │      ╰── cannot assign to a keyword
+   │ 
+   │ Help: pick another name
+───╯
+[31merror:[0m `for` is a reserved keyword and cannot be used as a function name
+   ╭─[ err_keyword_as_name.surf:2:4 ]
+   │
+ 2 │ fn for():
+   │    ─┬─  
+   │     ╰─── here
+   │ 
+   │ Help: pick another name
+───╯

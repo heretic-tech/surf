@@ -1,0 +1,13 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_unclosed_string\", \".surf\"), src)"
+---
+[31merror:[0m unclosed string literal
+   ╭─[ err_unclosed_string.surf:1:7 ]
+   │
+ 1 │ click("#submit)
+   │       ────┬────  
+   │           ╰────── string starts here
+   │ 
+   │ Help: strings cannot span lines; close it with `"`
+───╯

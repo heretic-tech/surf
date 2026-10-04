@@ -1,0 +1,262 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Stmt:
+      kind:
+        If:
+          branches:
+            - - kind:
+                  Ident:
+                    name: ready
+                    span:
+                      start: 71
+                      end: 76
+                span:
+                  start: 71
+                  end: 76
+              - stmts:
+                  - kind:
+                      Expr:
+                        kind:
+                          Call:
+                            callee:
+                              kind:
+                                Ident:
+                                  name: click
+                                  span:
+                                    start: 82
+                                    end: 87
+                              span:
+                                start: 82
+                                end: 87
+                            args:
+                              - name: ~
+                                value:
+                                  kind:
+                                    Str:
+                                      - Lit: "#go"
+                                  span:
+                                    start: 88
+                                    end: 93
+                                span:
+                                  start: 88
+                                  end: 93
+                        span:
+                          start: 82
+                          end: 94
+                    span:
+                      start: 82
+                      end: 94
+                  - kind:
+                      If:
+                        branches:
+                          - - kind:
+                                Ident:
+                                  name: fast
+                                  span:
+                                    start: 125
+                                    end: 129
+                              span:
+                                start: 125
+                                end: 129
+                            - stmts:
+                                - kind:
+                                    Expr:
+                                      kind:
+                                        Call:
+                                          callee:
+                                            kind:
+                                              Ident:
+                                                name: print
+                                                span:
+                                                  start: 139
+                                                  end: 144
+                                            span:
+                                              start: 139
+                                              end: 144
+                                          args:
+                                            - name: ~
+                                              value:
+                                                kind:
+                                                  Str:
+                                                    - Lit: fast
+                                                span:
+                                                  start: 145
+                                                  end: 151
+                                              span:
+                                                start: 145
+                                                end: 151
+                                      span:
+                                        start: 139
+                                        end: 152
+                                  span:
+                                    start: 139
+                                    end: 152
+                              span:
+                                start: 139
+                                end: 152
+                        else_block: ~
+                    span:
+                      start: 122
+                      end: 152
+                span:
+                  start: 82
+                  end: 152
+          else_block: ~
+      span:
+        start: 68
+        end: 152
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: print
+                    span:
+                      start: 203
+                      end: 208
+                span:
+                  start: 203
+                  end: 208
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: done
+                    span:
+                      start: 209
+                      end: 215
+                  span:
+                    start: 209
+                    end: 215
+          span:
+            start: 203
+            end: 216
+      span:
+        start: 203
+        end: 216
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: xs
+                span:
+                  start: 238
+                  end: 240
+            span:
+              start: 238
+              end: 240
+          value:
+            kind:
+              List:
+                - kind:
+                    Int: 1
+                  span:
+                    start: 249
+                    end: 250
+                - kind:
+                    Int: 2
+                  span:
+                    start: 260
+                    end: 261
+            span:
+              start: 243
+              end: 304
+      span:
+        start: 238
+        end: 304
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: m
+                span:
+                  start: 305
+                  end: 306
+            span:
+              start: 305
+              end: 306
+          value:
+            kind:
+              Map:
+                - - Ident:
+                      name: a
+                      span:
+                        start: 310
+                        end: 311
+                  - kind:
+                      Int: 1
+                    span:
+                      start: 313
+                      end: 314
+                - - Ident:
+                      name: b
+                      span:
+                        start: 321
+                        end: 322
+                  - kind:
+                      Int: 2
+                    span:
+                      start: 324
+                      end: 325
+            span:
+              start: 309
+              end: 326
+      span:
+        start: 305
+        end: 326
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: f
+                    span:
+                      start: 327
+                      end: 328
+                span:
+                  start: 327
+                  end: 328
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Int: 1
+                    span:
+                      start: 329
+                      end: 330
+                  span:
+                    start: 329
+                    end: 330
+                - name: ~
+                  value:
+                    kind:
+                      Int: 2
+                    span:
+                      start: 334
+                      end: 335
+                  span:
+                    start: 334
+                    end: 335
+          span:
+            start: 327
+            end: 336
+      span:
+        start: 327
+        end: 336
+span:
+  start: 0
+  end: 336

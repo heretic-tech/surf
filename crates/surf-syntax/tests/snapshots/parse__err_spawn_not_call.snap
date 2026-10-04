@@ -1,0 +1,13 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_spawn_not_call\", \".surf\"), src)"
+---
+[31merror:[0m `spawn` needs a call
+   ╭─[ err_spawn_not_call.surf:1:7 ]
+   │
+ 1 │ spawn worker
+   │       ───┬──  
+   │          ╰──── not a call
+   │ 
+   │ Help: write `spawn name(args)` — a fn, task or actor with its arguments
+───╯

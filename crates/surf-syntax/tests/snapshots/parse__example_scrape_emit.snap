@@ -1,0 +1,158 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: goto
+                    span:
+                      start: 62
+                      end: 66
+                span:
+                  start: 62
+                  end: 66
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: "https://example.com"
+                    span:
+                      start: 67
+                      end: 88
+                  span:
+                    start: 67
+                    end: 88
+          span:
+            start: 62
+            end: 89
+      span:
+        start: 62
+        end: 89
+  - Stmt:
+      kind:
+        For:
+          var:
+            name: a
+            span:
+              start: 95
+              end: 96
+          iter:
+            kind:
+              Call:
+                callee:
+                  kind:
+                    Ident:
+                      name: all
+                      span:
+                        start: 100
+                        end: 103
+                  span:
+                    start: 100
+                    end: 103
+                args:
+                  - name: ~
+                    value:
+                      kind:
+                        Str:
+                          - Lit: a
+                      span:
+                        start: 104
+                        end: 107
+                    span:
+                      start: 104
+                      end: 107
+            span:
+              start: 100
+              end: 108
+          body:
+            stmts:
+              - kind:
+                  Emit:
+                    kind:
+                      Map:
+                        - - Ident:
+                              name: text
+                              span:
+                                start: 120
+                                end: 124
+                          - kind:
+                              Method:
+                                receiver:
+                                  kind:
+                                    Ident:
+                                      name: a
+                                      span:
+                                        start: 126
+                                        end: 127
+                                  span:
+                                    start: 126
+                                    end: 127
+                                name:
+                                  name: text
+                                  span:
+                                    start: 128
+                                    end: 132
+                                args: []
+                            span:
+                              start: 126
+                              end: 134
+                        - - Ident:
+                              name: href
+                              span:
+                                start: 136
+                                end: 140
+                          - kind:
+                              Method:
+                                receiver:
+                                  kind:
+                                    Ident:
+                                      name: a
+                                      span:
+                                        start: 142
+                                        end: 143
+                                  span:
+                                    start: 142
+                                    end: 143
+                                name:
+                                  name: attr
+                                  span:
+                                    start: 144
+                                    end: 148
+                                args:
+                                  - name: ~
+                                    value:
+                                      kind:
+                                        Str:
+                                          - Lit: href
+                                      span:
+                                        start: 149
+                                        end: 155
+                                    span:
+                                      start: 149
+                                      end: 155
+                            span:
+                              start: 142
+                              end: 156
+                    span:
+                      start: 119
+                      end: 157
+                span:
+                  start: 114
+                  end: 157
+            span:
+              start: 114
+              end: 157
+      span:
+        start: 91
+        end: 157
+span:
+  start: 0
+  end: 158

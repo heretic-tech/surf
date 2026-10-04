@@ -1,0 +1,13 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_tab_indent\", \".surf\"), src)"
+---
+[31merror:[0m tabs are not allowed for indentation
+   ╭─[ err_tab_indent.surf:2:1 ]
+   │
+ 2 │     click("#a")
+   │ ┬───  
+   │ ╰───── tab character here
+   │ 
+   │ Help: indent with spaces only (4 per level is conventional)
+───╯

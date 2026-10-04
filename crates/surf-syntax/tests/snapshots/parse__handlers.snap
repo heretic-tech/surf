@@ -1,0 +1,376 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Handler:
+      event:
+        name: element_appears
+        span:
+          start: 3
+          end: 18
+      args:
+        - kind:
+            Str:
+              - Lit: ".checkout"
+          span:
+            start: 19
+            end: 30
+      body:
+        stmts:
+          - kind:
+              Expr:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: click
+                          span:
+                            start: 37
+                            end: 42
+                      span:
+                        start: 37
+                        end: 42
+                    args:
+                      - name: ~
+                        value:
+                          kind:
+                            Str:
+                              - Lit: ".checkout .accept"
+                          span:
+                            start: 43
+                            end: 62
+                        span:
+                          start: 43
+                          end: 62
+                span:
+                  start: 37
+                  end: 63
+            span:
+              start: 37
+              end: 63
+        span:
+          start: 37
+          end: 63
+      span:
+        start: 0
+        end: 63
+  - Handler:
+      event:
+        name: navigation
+        span:
+          start: 67
+          end: 77
+      args:
+        - kind:
+            Str:
+              - Lit: "*/login*"
+          span:
+            start: 78
+            end: 88
+      body:
+        stmts:
+          - kind:
+              Expr:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: print
+                          span:
+                            start: 95
+                            end: 100
+                      span:
+                        start: 95
+                        end: 100
+                    args:
+                      - name: ~
+                        value:
+                          kind:
+                            Str:
+                              - Lit: "went to "
+                              - Expr:
+                                  kind:
+                                    Field:
+                                      receiver:
+                                        kind:
+                                          Ident:
+                                            name: event
+                                            span:
+                                              start: 111
+                                              end: 116
+                                        span:
+                                          start: 111
+                                          end: 116
+                                      name:
+                                        name: url
+                                        span:
+                                          start: 117
+                                          end: 120
+                                  span:
+                                    start: 111
+                                    end: 120
+                          span:
+                            start: 101
+                            end: 122
+                        span:
+                          start: 101
+                          end: 122
+                span:
+                  start: 95
+                  end: 123
+            span:
+              start: 95
+              end: 123
+        span:
+          start: 95
+          end: 123
+      span:
+        start: 64
+        end: 123
+  - Handler:
+      event:
+        name: dialog
+        span:
+          start: 127
+          end: 133
+      args: []
+      body:
+        stmts:
+          - kind:
+              Expr:
+                kind:
+                  Method:
+                    receiver:
+                      kind:
+                        Ident:
+                          name: event
+                          span:
+                            start: 139
+                            end: 144
+                      span:
+                        start: 139
+                        end: 144
+                    name:
+                      name: accept
+                      span:
+                        start: 145
+                        end: 151
+                    args: []
+                span:
+                  start: 139
+                  end: 153
+            span:
+              start: 139
+              end: 153
+        span:
+          start: 139
+          end: 153
+      span:
+        start: 124
+        end: 153
+  - Handler:
+      event:
+        name: dialog
+        span:
+          start: 157
+          end: 163
+      args: []
+      body:
+        stmts:
+          - kind:
+              Expr:
+                kind:
+                  Method:
+                    receiver:
+                      kind:
+                        Ident:
+                          name: event
+                          span:
+                            start: 171
+                            end: 176
+                      span:
+                        start: 171
+                        end: 176
+                    name:
+                      name: dismiss
+                      span:
+                        start: 177
+                        end: 184
+                    args: []
+                span:
+                  start: 171
+                  end: 186
+            span:
+              start: 171
+              end: 186
+        span:
+          start: 171
+          end: 186
+      span:
+        start: 154
+        end: 186
+  - Handler:
+      event:
+        name: request
+        span:
+          start: 190
+          end: 197
+      args:
+        - kind:
+            Str:
+              - Lit: "*/api/*"
+          span:
+            start: 198
+            end: 207
+      body:
+        stmts:
+          - kind:
+              Expr:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: print
+                          span:
+                            start: 214
+                            end: 219
+                      span:
+                        start: 214
+                        end: 219
+                    args:
+                      - name: ~
+                        value:
+                          kind:
+                            Field:
+                              receiver:
+                                kind:
+                                  Ident:
+                                    name: event
+                                    span:
+                                      start: 220
+                                      end: 225
+                                span:
+                                  start: 220
+                                  end: 225
+                              name:
+                                name: method
+                                span:
+                                  start: 226
+                                  end: 232
+                          span:
+                            start: 220
+                            end: 232
+                        span:
+                          start: 220
+                          end: 232
+                      - name: ~
+                        value:
+                          kind:
+                            Field:
+                              receiver:
+                                kind:
+                                  Ident:
+                                    name: event
+                                    span:
+                                      start: 234
+                                      end: 239
+                                span:
+                                  start: 234
+                                  end: 239
+                              name:
+                                name: url
+                                span:
+                                  start: 240
+                                  end: 243
+                          span:
+                            start: 234
+                            end: 243
+                        span:
+                          start: 234
+                          end: 243
+                span:
+                  start: 214
+                  end: 244
+            span:
+              start: 214
+              end: 244
+        span:
+          start: 214
+          end: 244
+      span:
+        start: 187
+        end: 244
+  - Handler:
+      event:
+        name: response
+        span:
+          start: 248
+          end: 256
+      args:
+        - kind:
+            Str:
+              - Lit: "*.json"
+          span:
+            start: 257
+            end: 265
+      body:
+        stmts:
+          - kind:
+              Expr:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: print
+                          span:
+                            start: 272
+                            end: 277
+                      span:
+                        start: 272
+                        end: 277
+                    args:
+                      - name: ~
+                        value:
+                          kind:
+                            Field:
+                              receiver:
+                                kind:
+                                  Ident:
+                                    name: event
+                                    span:
+                                      start: 278
+                                      end: 283
+                                span:
+                                  start: 278
+                                  end: 283
+                              name:
+                                name: status
+                                span:
+                                  start: 284
+                                  end: 290
+                          span:
+                            start: 278
+                            end: 290
+                        span:
+                          start: 278
+                          end: 290
+                span:
+                  start: 272
+                  end: 291
+            span:
+              start: 272
+              end: 291
+        span:
+          start: 272
+          end: 291
+      span:
+        start: 245
+        end: 291
+span:
+  start: 0
+  end: 292

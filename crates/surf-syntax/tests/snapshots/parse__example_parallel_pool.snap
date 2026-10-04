@@ -1,0 +1,314 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Config:
+      kind:
+        name: browser
+        span:
+          start: 71
+          end: 78
+      alias: ~
+      props:
+        - key:
+            name: headless
+            span:
+              start: 84
+              end: 92
+          value:
+            kind:
+              Bool: true
+            span:
+              start: 94
+              end: 98
+          span:
+            start: 84
+            end: 98
+        - key:
+            name: timeout
+            span:
+              start: 103
+              end: 110
+          value:
+            kind:
+              Duration:
+                secs: 20
+                nanos: 0
+            span:
+              start: 112
+              end: 115
+          span:
+            start: 103
+            end: 115
+      span:
+        start: 71
+        end: 115
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: urls
+                span:
+                  start: 117
+                  end: 121
+            span:
+              start: 117
+              end: 121
+          value:
+            kind:
+              List:
+                - kind:
+                    Str:
+                      - Lit: "https://example.com"
+                  span:
+                    start: 130
+                    end: 151
+                - kind:
+                    Str:
+                      - Lit: "https://example.org"
+                  span:
+                    start: 157
+                    end: 178
+                - kind:
+                    Str:
+                      - Lit: "https://example.net"
+                  span:
+                    start: 184
+                    end: 205
+            span:
+              start: 124
+              end: 208
+      span:
+        start: 117
+        end: 208
+  - Task:
+      name:
+        name: fetch_title
+        span:
+          start: 215
+          end: 226
+      params:
+        - name:
+            name: url
+            span:
+              start: 227
+              end: 230
+          default: ~
+          span:
+            start: 227
+            end: 230
+      props:
+        - key:
+            name: retry
+            span:
+              start: 237
+              end: 242
+          value:
+            kind:
+              Int: 3
+            span:
+              start: 244
+              end: 245
+          span:
+            start: 237
+            end: 245
+        - key:
+            name: timeout
+            span:
+              start: 250
+              end: 257
+          value:
+            kind:
+              Duration:
+                secs: 30
+                nanos: 0
+            span:
+              start: 259
+              end: 262
+          span:
+            start: 250
+            end: 262
+      body:
+        stmts:
+          - kind:
+              Expr:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: goto
+                          span:
+                            start: 267
+                            end: 271
+                      span:
+                        start: 267
+                        end: 271
+                    args:
+                      - name: ~
+                        value:
+                          kind:
+                            Ident:
+                              name: url
+                              span:
+                                start: 272
+                                end: 275
+                          span:
+                            start: 272
+                            end: 275
+                        span:
+                          start: 272
+                          end: 275
+                span:
+                  start: 267
+                  end: 276
+            span:
+              start: 267
+              end: 276
+          - kind:
+              Return:
+                kind:
+                  Map:
+                    - - Ident:
+                          name: url
+                          span:
+                            start: 289
+                            end: 292
+                      - kind:
+                          Ident:
+                            name: url
+                            span:
+                              start: 294
+                              end: 297
+                        span:
+                          start: 294
+                          end: 297
+                    - - Ident:
+                          name: title
+                          span:
+                            start: 299
+                            end: 304
+                      - kind:
+                          Call:
+                            callee:
+                              kind:
+                                Ident:
+                                  name: title
+                                  span:
+                                    start: 306
+                                    end: 311
+                              span:
+                                start: 306
+                                end: 311
+                            args: []
+                        span:
+                          start: 306
+                          end: 313
+                span:
+                  start: 288
+                  end: 314
+            span:
+              start: 281
+              end: 314
+        span:
+          start: 267
+          end: 314
+      span:
+        start: 210
+        end: 314
+  - Stmt:
+      kind:
+        ParallelFor:
+          var:
+            name: url
+            span:
+              start: 329
+              end: 332
+          iter:
+            kind:
+              Ident:
+                name: urls
+                span:
+                  start: 336
+                  end: 340
+            span:
+              start: 336
+              end: 340
+          opts:
+            - key:
+                name: limit
+                span:
+                  start: 346
+                  end: 351
+              value:
+                kind:
+                  Int: 2
+                span:
+                  start: 353
+                  end: 354
+              span:
+                start: 346
+                end: 354
+            - key:
+                name: fail_fast
+                span:
+                  start: 359
+                  end: 368
+              value:
+                kind:
+                  Bool: false
+                span:
+                  start: 370
+                  end: 375
+              span:
+                start: 359
+                end: 375
+          body:
+            stmts:
+              - kind:
+                  Emit:
+                    kind:
+                      Call:
+                        callee:
+                          kind:
+                            Ident:
+                              name: fetch_title
+                              span:
+                                start: 385
+                                end: 396
+                          span:
+                            start: 385
+                            end: 396
+                        args:
+                          - name: ~
+                            value:
+                              kind:
+                                Ident:
+                                  name: url
+                                  span:
+                                    start: 397
+                                    end: 400
+                              span:
+                                start: 397
+                                end: 400
+                            span:
+                              start: 397
+                              end: 400
+                    span:
+                      start: 385
+                      end: 401
+                span:
+                  start: 380
+                  end: 401
+            span:
+              start: 380
+              end: 401
+      span:
+        start: 316
+        end: 401
+span:
+  start: 0
+  end: 402

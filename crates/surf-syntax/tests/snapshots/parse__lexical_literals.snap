@@ -1,0 +1,253 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: ints
+                span:
+                  start: 0
+                  end: 4
+            span:
+              start: 0
+              end: 4
+          value:
+            kind:
+              List:
+                - kind:
+                    Int: 0
+                  span:
+                    start: 8
+                    end: 9
+                - kind:
+                    Int: 42
+                  span:
+                    start: 11
+                    end: 13
+                - kind:
+                    Int: -7
+                  span:
+                    start: 15
+                    end: 17
+                - kind:
+                    Int: 1000
+                  span:
+                    start: 19
+                    end: 24
+            span:
+              start: 7
+              end: 25
+      span:
+        start: 0
+        end: 25
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: floats
+                span:
+                  start: 26
+                  end: 32
+            span:
+              start: 26
+              end: 32
+          value:
+            kind:
+              List:
+                - kind:
+                    Float: 1.5
+                  span:
+                    start: 36
+                    end: 39
+                - kind:
+                    Float: 0.25
+                  span:
+                    start: 41
+                    end: 45
+                - kind:
+                    Float: 2000
+                  span:
+                    start: 47
+                    end: 50
+                - kind:
+                    Float: -0.0015
+                  span:
+                    start: 52
+                    end: 59
+            span:
+              start: 35
+              end: 60
+      span:
+        start: 26
+        end: 60
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: bools
+                span:
+                  start: 61
+                  end: 66
+            span:
+              start: 61
+              end: 66
+          value:
+            kind:
+              List:
+                - kind:
+                    Bool: true
+                  span:
+                    start: 70
+                    end: 74
+                - kind:
+                    Bool: false
+                  span:
+                    start: 76
+                    end: 81
+                - kind: Nil
+                  span:
+                    start: 83
+                    end: 86
+            span:
+              start: 69
+              end: 87
+      span:
+        start: 61
+        end: 87
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: durs
+                span:
+                  start: 88
+                  end: 92
+            span:
+              start: 88
+              end: 92
+          value:
+            kind:
+              List:
+                - kind:
+                    Duration:
+                      secs: 0
+                      nanos: 500000000
+                  span:
+                    start: 96
+                    end: 101
+                - kind:
+                    Duration:
+                      secs: 2
+                      nanos: 0
+                  span:
+                    start: 103
+                    end: 105
+                - kind:
+                    Duration:
+                      secs: 180
+                      nanos: 0
+                  span:
+                    start: 107
+                    end: 109
+                - kind:
+                    Duration:
+                      secs: 3600
+                      nanos: 0
+                  span:
+                    start: 111
+                    end: 113
+                - kind:
+                    Duration:
+                      secs: 1
+                      nanos: 500000000
+                  span:
+                    start: 115
+                    end: 119
+            span:
+              start: 95
+              end: 120
+      span:
+        start: 88
+        end: 120
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: s
+                span:
+                  start: 121
+                  end: 122
+            span:
+              start: 121
+              end: 122
+          value:
+            kind:
+              Str:
+                - Lit: hello
+            span:
+              start: 125
+              end: 132
+      span:
+        start: 121
+        end: 132
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: esc
+                span:
+                  start: 133
+                  end: 136
+            span:
+              start: 133
+              end: 136
+          value:
+            kind:
+              Str:
+                - Lit: "a\nb\tc\r\\\"{x}😀"
+            span:
+              start: 139
+              end: 168
+      span:
+        start: 133
+        end: 168
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: empty
+                span:
+                  start: 169
+                  end: 174
+            span:
+              start: 169
+              end: 174
+          value:
+            kind:
+              Str: []
+            span:
+              start: 177
+              end: 179
+      span:
+        start: 169
+        end: 179
+span:
+  start: 0
+  end: 180

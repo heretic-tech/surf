@@ -1,0 +1,535 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: xs
+                span:
+                  start: 0
+                  end: 2
+            span:
+              start: 0
+              end: 2
+          value:
+            kind:
+              List:
+                - kind:
+                    Int: 1
+                  span:
+                    start: 6
+                    end: 7
+                - kind:
+                    Int: 2
+                  span:
+                    start: 9
+                    end: 10
+                - kind:
+                    Int: 3
+                  span:
+                    start: 12
+                    end: 13
+            span:
+              start: 5
+              end: 14
+      span:
+        start: 0
+        end: 14
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Index:
+              receiver:
+                kind:
+                  Ident:
+                    name: xs
+                    span:
+                      start: 15
+                      end: 17
+                span:
+                  start: 15
+                  end: 17
+              index:
+                kind:
+                  Int: 0
+                span:
+                  start: 18
+                  end: 19
+          span:
+            start: 15
+            end: 20
+      span:
+        start: 15
+        end: 20
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Index:
+                receiver:
+                  kind:
+                    Ident:
+                      name: xs
+                      span:
+                        start: 21
+                        end: 23
+                  span:
+                    start: 21
+                    end: 23
+                index:
+                  kind:
+                    Int: 1
+                  span:
+                    start: 24
+                    end: 25
+            span:
+              start: 21
+              end: 26
+          value:
+            kind:
+              Int: 20
+            span:
+              start: 29
+              end: 31
+      span:
+        start: 21
+        end: 31
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: push
+                    span:
+                      start: 32
+                      end: 36
+                span:
+                  start: 32
+                  end: 36
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Ident:
+                        name: xs
+                        span:
+                          start: 37
+                          end: 39
+                    span:
+                      start: 37
+                      end: 39
+                  span:
+                    start: 37
+                    end: 39
+                - name: ~
+                  value:
+                    kind:
+                      Int: 4
+                    span:
+                      start: 41
+                      end: 42
+                  span:
+                    start: 41
+                    end: 42
+          span:
+            start: 32
+            end: 43
+      span:
+        start: 32
+        end: 43
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Method:
+              receiver:
+                kind:
+                  Ident:
+                    name: xs
+                    span:
+                      start: 44
+                      end: 46
+                span:
+                  start: 44
+                  end: 46
+              name:
+                name: push
+                span:
+                  start: 47
+                  end: 51
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Int: 4
+                    span:
+                      start: 52
+                      end: 53
+                  span:
+                    start: 52
+                    end: 53
+          span:
+            start: 44
+            end: 54
+      span:
+        start: 44
+        end: 54
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Index:
+              receiver:
+                kind:
+                  Ident:
+                    name: xs
+                    span:
+                      start: 55
+                      end: 57
+                span:
+                  start: 55
+                  end: 57
+              index:
+                kind:
+                  Int: -1
+                span:
+                  start: 58
+                  end: 60
+          span:
+            start: 55
+            end: 61
+      span:
+        start: 55
+        end: 61
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: empty
+                span:
+                  start: 62
+                  end: 67
+            span:
+              start: 62
+              end: 67
+          value:
+            kind:
+              List: []
+            span:
+              start: 70
+              end: 72
+      span:
+        start: 62
+        end: 72
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: trailing
+                span:
+                  start: 73
+                  end: 81
+            span:
+              start: 73
+              end: 81
+          value:
+            kind:
+              List:
+                - kind:
+                    Int: 1
+                  span:
+                    start: 85
+                    end: 86
+                - kind:
+                    Int: 2
+                  span:
+                    start: 88
+                    end: 89
+            span:
+              start: 84
+              end: 91
+      span:
+        start: 73
+        end: 91
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: m
+                span:
+                  start: 92
+                  end: 93
+            span:
+              start: 92
+              end: 93
+          value:
+            kind:
+              Map:
+                - - Ident:
+                      name: name
+                      span:
+                        start: 97
+                        end: 101
+                  - kind:
+                      Str:
+                        - Lit: a
+                    span:
+                      start: 103
+                      end: 106
+                - - Str:
+                      - - Lit: with space
+                      - start: 108
+                        end: 120
+                  - kind:
+                      Int: 1
+                    span:
+                      start: 122
+                      end: 123
+                - - Expr:
+                      kind:
+                        Ident:
+                          name: key_expr
+                          span:
+                            start: 126
+                            end: 134
+                      span:
+                        start: 126
+                        end: 134
+                  - kind:
+                      Int: 2
+                    span:
+                      start: 137
+                      end: 138
+            span:
+              start: 96
+              end: 139
+      span:
+        start: 92
+        end: 139
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Field:
+              receiver:
+                kind:
+                  Ident:
+                    name: m
+                    span:
+                      start: 140
+                      end: 141
+                span:
+                  start: 140
+                  end: 141
+              name:
+                name: name
+                span:
+                  start: 142
+                  end: 146
+          span:
+            start: 140
+            end: 146
+      span:
+        start: 140
+        end: 146
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Index:
+              receiver:
+                kind:
+                  Ident:
+                    name: m
+                    span:
+                      start: 147
+                      end: 148
+                span:
+                  start: 147
+                  end: 148
+              index:
+                kind:
+                  Str:
+                    - Lit: name
+                span:
+                  start: 149
+                  end: 155
+          span:
+            start: 147
+            end: 156
+      span:
+        start: 147
+        end: 156
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Field:
+                receiver:
+                  kind:
+                    Ident:
+                      name: m
+                      span:
+                        start: 157
+                        end: 158
+                  span:
+                    start: 157
+                    end: 158
+                name:
+                  name: count
+                  span:
+                    start: 159
+                    end: 164
+            span:
+              start: 157
+              end: 164
+          value:
+            kind:
+              Int: 3
+            span:
+              start: 167
+              end: 168
+      span:
+        start: 157
+        end: 168
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Field:
+                receiver:
+                  kind:
+                    Index:
+                      receiver:
+                        kind:
+                          Field:
+                            receiver:
+                              kind:
+                                Field:
+                                  receiver:
+                                    kind:
+                                      Ident:
+                                        name: m
+                                        span:
+                                          start: 169
+                                          end: 170
+                                    span:
+                                      start: 169
+                                      end: 170
+                                  name:
+                                    name: inner
+                                    span:
+                                      start: 171
+                                      end: 176
+                              span:
+                                start: 169
+                                end: 176
+                            name:
+                              name: deep
+                              span:
+                                start: 177
+                                end: 181
+                        span:
+                          start: 169
+                          end: 181
+                      index:
+                        kind:
+                          Int: 0
+                        span:
+                          start: 182
+                          end: 183
+                  span:
+                    start: 169
+                    end: 184
+                name:
+                  name: x
+                  span:
+                    start: 185
+                    end: 186
+            span:
+              start: 169
+              end: 186
+          value:
+            kind:
+              Int: 1
+            span:
+              start: 189
+              end: 190
+      span:
+        start: 169
+        end: 190
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: e
+                span:
+                  start: 191
+                  end: 192
+            span:
+              start: 191
+              end: 192
+          value:
+            kind:
+              Map: []
+            span:
+              start: 195
+              end: 197
+      span:
+        start: 191
+        end: 197
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: t
+                span:
+                  start: 198
+                  end: 199
+            span:
+              start: 198
+              end: 199
+          value:
+            kind:
+              Map:
+                - - Ident:
+                      name: a
+                      span:
+                        start: 203
+                        end: 204
+                  - kind:
+                      Int: 1
+                    span:
+                      start: 206
+                      end: 207
+            span:
+              start: 202
+              end: 209
+      span:
+        start: 198
+        end: 209
+span:
+  start: 0
+  end: 210

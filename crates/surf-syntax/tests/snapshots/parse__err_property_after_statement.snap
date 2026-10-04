@@ -1,0 +1,13 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_property_after_statement\", \".surf\"), src)"
+---
+[31merror:[0m property lines must come before statements
+   ╭─[ err_property_after_statement.surf:4:5 ]
+   │
+ 4 │     timeout: 5s
+   │     ────┬───  
+   │         ╰───── `timeout:` is a property line
+   │ 
+   │ Help: move `timeout: …` above the first statement of the task body
+───╯

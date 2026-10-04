@@ -1,0 +1,294 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: name
+                span:
+                  start: 0
+                  end: 4
+            span:
+              start: 0
+              end: 4
+          value:
+            kind:
+              Str:
+                - Lit: world
+            span:
+              start: 7
+              end: 14
+      span:
+        start: 0
+        end: 14
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: print
+                    span:
+                      start: 15
+                      end: 20
+                span:
+                  start: 15
+                  end: 20
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: "hello "
+                        - Expr:
+                            kind:
+                              Ident:
+                                name: name
+                                span:
+                                  start: 29
+                                  end: 33
+                            span:
+                              start: 29
+                              end: 33
+                        - Lit: ", 1+1="
+                        - Expr:
+                            kind:
+                              Binary:
+                                op: Add
+                                lhs:
+                                  kind:
+                                    Int: 1
+                                  span:
+                                    start: 41
+                                    end: 42
+                                rhs:
+                                  kind:
+                                    Int: 1
+                                  span:
+                                    start: 45
+                                    end: 46
+                            span:
+                              start: 41
+                              end: 46
+                    span:
+                      start: 21
+                      end: 48
+                  span:
+                    start: 21
+                    end: 48
+          span:
+            start: 15
+            end: 49
+      span:
+        start: 15
+        end: 49
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: print
+                    span:
+                      start: 50
+                      end: 55
+                span:
+                  start: 50
+                  end: 55
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: "url: "
+                        - Expr:
+                            kind:
+                              Method:
+                                receiver:
+                                  kind:
+                                    Ident:
+                                      name: page
+                                      span:
+                                        start: 63
+                                        end: 67
+                                  span:
+                                    start: 63
+                                    end: 67
+                                name:
+                                  name: url
+                                  span:
+                                    start: 68
+                                    end: 71
+                                args: []
+                            span:
+                              start: 63
+                              end: 73
+                    span:
+                      start: 56
+                      end: 75
+                  span:
+                    start: 56
+                    end: 75
+          span:
+            start: 50
+            end: 76
+      span:
+        start: 50
+        end: 76
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: print
+                    span:
+                      start: 77
+                      end: 82
+                span:
+                  start: 77
+                  end: 82
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: "nested "
+                        - Expr:
+                            kind:
+                              Str:
+                                - Lit: q
+                                - Expr:
+                                    kind:
+                                      Ident:
+                                        name: name
+                                        span:
+                                          start: 95
+                                          end: 99
+                                    span:
+                                      start: 95
+                                      end: 99
+                            span:
+                              start: 92
+                              end: 101
+                        - Lit: " and "
+                        - Expr:
+                            kind:
+                              Index:
+                                receiver:
+                                  kind:
+                                    Ident:
+                                      name: m
+                                      span:
+                                        start: 108
+                                        end: 109
+                                  span:
+                                    start: 108
+                                    end: 109
+                                index:
+                                  kind:
+                                    Str:
+                                      - Lit: k
+                                  span:
+                                    start: 110
+                                    end: 113
+                            span:
+                              start: 108
+                              end: 114
+                        - Lit: " and "
+                        - Expr:
+                            kind:
+                              Index:
+                                receiver:
+                                  kind:
+                                    List:
+                                      - kind:
+                                          Int: 1
+                                        span:
+                                          start: 122
+                                          end: 123
+                                      - kind:
+                                          Int: 2
+                                        span:
+                                          start: 125
+                                          end: 126
+                                  span:
+                                    start: 121
+                                    end: 127
+                                index:
+                                  kind:
+                                    Int: 0
+                                  span:
+                                    start: 128
+                                    end: 129
+                            span:
+                              start: 121
+                              end: 130
+                    span:
+                      start: 83
+                      end: 132
+                  span:
+                    start: 83
+                    end: 132
+          span:
+            start: 77
+            end: 133
+      span:
+        start: 77
+        end: 133
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: print
+                    span:
+                      start: 134
+                      end: 139
+                span:
+                  start: 134
+                  end: 139
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Expr:
+                            kind:
+                              Ident:
+                                name: x
+                                span:
+                                  start: 142
+                                  end: 143
+                            span:
+                              start: 142
+                              end: 143
+                    span:
+                      start: 140
+                      end: 145
+                  span:
+                    start: 140
+                    end: 145
+          span:
+            start: 134
+            end: 146
+      span:
+        start: 134
+        end: 146
+span:
+  start: 0
+  end: 147

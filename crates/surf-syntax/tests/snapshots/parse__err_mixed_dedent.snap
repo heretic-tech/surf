@@ -1,0 +1,13 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_mixed_dedent\", \".surf\"), src)"
+---
+[31merror:[0m unindent does not match any outer indentation level
+   ╭─[ err_mixed_dedent.surf:4:1 ]
+   │
+ 4 │   b()
+   │ ─┬  
+   │  ╰── indented by 2 spaces
+   │ 
+   │ Help: the enclosing blocks are indented by 0, 4, 8 spaces
+───╯

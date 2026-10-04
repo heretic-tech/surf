@@ -1,0 +1,16 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_missing_block\", \".surf\"), src)"
+---
+[31merror:[0m expected an indented block after ':'
+   ╭─[ err_missing_block.surf:1:5 ]
+   │
+ 1 │ if x:
+   │     ┬  
+   │     ╰── this ':' opens a block
+ 2 │ print(1)
+   │ ┬  
+   │ ╰── this line is not indented deeper
+   │ 
+   │ Help: indent the block body with spaces, e.g. 4
+───╯

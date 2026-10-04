@@ -1,0 +1,249 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Method:
+              receiver:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: page
+                          span:
+                            start: 78
+                            end: 82
+                      span:
+                        start: 78
+                        end: 82
+                    args:
+                      - name: ~
+                        value:
+                          kind:
+                            Int: 1
+                          span:
+                            start: 83
+                            end: 84
+                        span:
+                          start: 83
+                          end: 84
+                span:
+                  start: 78
+                  end: 85
+              name:
+                name: goto
+                span:
+                  start: 86
+                  end: 90
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: "https://example.com"
+                    span:
+                      start: 91
+                      end: 112
+                  span:
+                    start: 91
+                    end: 112
+          span:
+            start: 78
+            end: 113
+      span:
+        start: 78
+        end: 113
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Method:
+              receiver:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: page
+                          span:
+                            start: 114
+                            end: 118
+                      span:
+                        start: 114
+                        end: 118
+                    args:
+                      - name: ~
+                        value:
+                          kind:
+                            Int: 2
+                          span:
+                            start: 119
+                            end: 120
+                        span:
+                          start: 119
+                          end: 120
+                span:
+                  start: 114
+                  end: 121
+              name:
+                name: goto
+                span:
+                  start: 122
+                  end: 126
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: "https://example.org"
+                    span:
+                      start: 127
+                      end: 148
+                  span:
+                    start: 127
+                    end: 148
+          span:
+            start: 114
+            end: 149
+      span:
+        start: 114
+        end: 149
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Method:
+              receiver:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: page
+                          span:
+                            start: 151
+                            end: 155
+                      span:
+                        start: 151
+                        end: 155
+                    args:
+                      - name: ~
+                        value:
+                          kind:
+                            Int: 1
+                          span:
+                            start: 156
+                            end: 157
+                        span:
+                          start: 156
+                          end: 157
+                span:
+                  start: 151
+                  end: 158
+              name:
+                name: type
+                span:
+                  start: 159
+                  end: 163
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: "input[name=q]"
+                    span:
+                      start: 164
+                      end: 179
+                  span:
+                    start: 164
+                    end: 179
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: surf
+                    span:
+                      start: 181
+                      end: 187
+                  span:
+                    start: 181
+                    end: 187
+          span:
+            start: 151
+            end: 188
+      span:
+        start: 151
+        end: 188
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: print
+                    span:
+                      start: 189
+                      end: 194
+                span:
+                  start: 189
+                  end: 194
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Method:
+                        receiver:
+                          kind:
+                            Call:
+                              callee:
+                                kind:
+                                  Ident:
+                                    name: page
+                                    span:
+                                      start: 195
+                                      end: 199
+                                span:
+                                  start: 195
+                                  end: 199
+                              args:
+                                - name: ~
+                                  value:
+                                    kind:
+                                      Int: 2
+                                    span:
+                                      start: 200
+                                      end: 201
+                                  span:
+                                    start: 200
+                                    end: 201
+                          span:
+                            start: 195
+                            end: 202
+                        name:
+                          name: title
+                          span:
+                            start: 203
+                            end: 208
+                        args: []
+                    span:
+                      start: 195
+                      end: 210
+                  span:
+                    start: 195
+                    end: 210
+          span:
+            start: 189
+            end: 211
+      span:
+        start: 189
+        end: 211
+span:
+  start: 0
+  end: 212

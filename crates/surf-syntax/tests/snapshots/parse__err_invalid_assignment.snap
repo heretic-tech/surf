@@ -1,0 +1,22 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_invalid_assignment\", \".surf\"), src)"
+---
+[31merror:[0m invalid assignment target
+   ╭─[ err_invalid_assignment.surf:1:1 ]
+   │
+ 1 │ f(x) = 1
+   │ ──┬─  
+   │   ╰─── cannot assign to this expression
+   │ 
+   │ Help: assign to a name (`x = …`), a field (`m.k = …`) or an index (`xs[0] = …`)
+───╯
+[31merror:[0m invalid assignment target
+   ╭─[ err_invalid_assignment.surf:2:1 ]
+   │
+ 2 │ 1 = 2
+   │ ┬  
+   │ ╰── cannot assign to this expression
+   │ 
+   │ Help: assign to a name (`x = …`), a field (`m.k = …`) or an index (`xs[0] = …`)
+───╯

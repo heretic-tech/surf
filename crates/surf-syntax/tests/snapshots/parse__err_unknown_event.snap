@@ -1,0 +1,22 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_unknown_event\", \".surf\"), src)"
+---
+[31merror:[0m unknown event `elementappears`
+   ╭─[ err_unknown_event.surf:1:4 ]
+   │
+ 1 │ on elementappears(".x"):
+   │    ───────┬──────  
+   │           ╰──────── here
+   │ 
+   │ Help: did you mean `element_appears`?
+───╯
+[31merror:[0m `on message:` is only valid inside an actor body
+   ╭─[ err_unknown_event.surf:3:4 ]
+   │
+ 3 │ on message:
+   │    ───┬───  
+   │       ╰───── here
+   │ 
+   │ Help: messages are delivered to actors; move this handler into an `actor` body
+───╯

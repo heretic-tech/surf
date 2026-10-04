@@ -1,0 +1,554 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Fn:
+      name:
+        name: crawl
+        span:
+          start: 3
+          end: 8
+      params:
+        - name:
+            name: url
+            span:
+              start: 9
+              end: 12
+          default: ~
+          span:
+            start: 9
+            end: 12
+      body:
+        stmts:
+          - kind:
+              Expr:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: goto
+                          span:
+                            start: 19
+                            end: 23
+                      span:
+                        start: 19
+                        end: 23
+                    args:
+                      - name: ~
+                        value:
+                          kind:
+                            Ident:
+                              name: url
+                              span:
+                                start: 24
+                                end: 27
+                          span:
+                            start: 24
+                            end: 27
+                        span:
+                          start: 24
+                          end: 27
+                span:
+                  start: 19
+                  end: 28
+            span:
+              start: 19
+              end: 28
+          - kind:
+              Return:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: title
+                          span:
+                            start: 40
+                            end: 45
+                      span:
+                        start: 40
+                        end: 45
+                    args: []
+                span:
+                  start: 40
+                  end: 47
+            span:
+              start: 33
+              end: 47
+        span:
+          start: 19
+          end: 47
+      span:
+        start: 0
+        end: 47
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: h
+                span:
+                  start: 48
+                  end: 49
+            span:
+              start: 48
+              end: 49
+          value:
+            kind:
+              Spawn:
+                kind:
+                  Call:
+                    callee:
+                      kind:
+                        Ident:
+                          name: crawl
+                          span:
+                            start: 58
+                            end: 63
+                      span:
+                        start: 58
+                        end: 63
+                    args:
+                      - name: ~
+                        value:
+                          kind:
+                            Str:
+                              - Lit: "https://example.com"
+                          span:
+                            start: 64
+                            end: 85
+                        span:
+                          start: 64
+                          end: 85
+                span:
+                  start: 58
+                  end: 86
+            span:
+              start: 52
+              end: 86
+      span:
+        start: 48
+        end: 86
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Call:
+              callee:
+                kind:
+                  Ident:
+                    name: print
+                    span:
+                      start: 87
+                      end: 92
+                span:
+                  start: 87
+                  end: 92
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Method:
+                        receiver:
+                          kind:
+                            Ident:
+                              name: h
+                              span:
+                                start: 93
+                                end: 94
+                          span:
+                            start: 93
+                            end: 94
+                        name:
+                          name: join
+                          span:
+                            start: 95
+                            end: 99
+                        args: []
+                    span:
+                      start: 93
+                      end: 101
+                  span:
+                    start: 93
+                    end: 101
+          span:
+            start: 87
+            end: 102
+      span:
+        start: 87
+        end: 102
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Spawn:
+              kind:
+                Call:
+                  callee:
+                    kind:
+                      Ident:
+                        name: crawl
+                        span:
+                          start: 109
+                          end: 114
+                    span:
+                      start: 109
+                      end: 114
+                  args:
+                    - name: ~
+                      value:
+                        kind:
+                          Str:
+                            - Lit: "https://example.org"
+                        span:
+                          start: 115
+                          end: 136
+                      span:
+                        start: 115
+                        end: 136
+              span:
+                start: 109
+                end: 137
+          span:
+            start: 103
+            end: 137
+      span:
+        start: 103
+        end: 137
+  - Stmt:
+      kind:
+        Assign:
+          target:
+            kind:
+              Ident:
+                name: handles
+                span:
+                  start: 138
+                  end: 145
+            span:
+              start: 138
+              end: 145
+          value:
+            kind:
+              List:
+                - kind:
+                    Spawn:
+                      kind:
+                        Call:
+                          callee:
+                            kind:
+                              Ident:
+                                name: crawl
+                                span:
+                                  start: 155
+                                  end: 160
+                            span:
+                              start: 155
+                              end: 160
+                          args:
+                            - name: ~
+                              value:
+                                kind:
+                                  Str:
+                                    - Lit: a
+                                span:
+                                  start: 161
+                                  end: 164
+                              span:
+                                start: 161
+                                end: 164
+                      span:
+                        start: 155
+                        end: 165
+                  span:
+                    start: 149
+                    end: 165
+                - kind:
+                    Spawn:
+                      kind:
+                        Call:
+                          callee:
+                            kind:
+                              Ident:
+                                name: crawl
+                                span:
+                                  start: 173
+                                  end: 178
+                            span:
+                              start: 173
+                              end: 178
+                          args:
+                            - name: ~
+                              value:
+                                kind:
+                                  Str:
+                                    - Lit: b
+                                span:
+                                  start: 179
+                                  end: 182
+                              span:
+                                start: 179
+                                end: 182
+                      span:
+                        start: 173
+                        end: 183
+                  span:
+                    start: 167
+                    end: 183
+            span:
+              start: 148
+              end: 184
+      span:
+        start: 138
+        end: 184
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Spawn:
+              kind:
+                Method:
+                  receiver:
+                    kind:
+                      Ident:
+                        name: work
+                        span:
+                          start: 191
+                          end: 195
+                    span:
+                      start: 191
+                      end: 195
+                  name:
+                    name: fetch
+                    span:
+                      start: 196
+                      end: 201
+                  args:
+                    - name: ~
+                      value:
+                        kind:
+                          Int: 1
+                        span:
+                          start: 202
+                          end: 203
+                      span:
+                        start: 202
+                        end: 203
+              span:
+                start: 191
+                end: 204
+          span:
+            start: 185
+            end: 204
+      span:
+        start: 185
+        end: 204
+  - Stmt:
+      kind:
+        ParallelFor:
+          var:
+            name: url
+            span:
+              start: 218
+              end: 221
+          iter:
+            kind:
+              Ident:
+                name: urls
+                span:
+                  start: 225
+                  end: 229
+            span:
+              start: 225
+              end: 229
+          opts:
+            - key:
+                name: limit
+                span:
+                  start: 235
+                  end: 240
+              value:
+                kind:
+                  Int: 4
+                span:
+                  start: 242
+                  end: 243
+              span:
+                start: 235
+                end: 243
+            - key:
+                name: fail_fast
+                span:
+                  start: 248
+                  end: 257
+              value:
+                kind:
+                  Bool: false
+                span:
+                  start: 259
+                  end: 264
+              span:
+                start: 248
+                end: 264
+          body:
+            stmts:
+              - kind:
+                  Expr:
+                    kind:
+                      Call:
+                        callee:
+                          kind:
+                            Ident:
+                              name: goto
+                              span:
+                                start: 269
+                                end: 273
+                          span:
+                            start: 269
+                            end: 273
+                        args:
+                          - name: ~
+                            value:
+                              kind:
+                                Ident:
+                                  name: url
+                                  span:
+                                    start: 274
+                                    end: 277
+                              span:
+                                start: 274
+                                end: 277
+                            span:
+                              start: 274
+                              end: 277
+                    span:
+                      start: 269
+                      end: 278
+                span:
+                  start: 269
+                  end: 278
+              - kind:
+                  Emit:
+                    kind:
+                      Map:
+                        - - Ident:
+                              name: url
+                              span:
+                                start: 289
+                                end: 292
+                          - kind:
+                              Ident:
+                                name: url
+                                span:
+                                  start: 294
+                                  end: 297
+                            span:
+                              start: 294
+                              end: 297
+                        - - Ident:
+                              name: title
+                              span:
+                                start: 299
+                                end: 304
+                          - kind:
+                              Call:
+                                callee:
+                                  kind:
+                                    Ident:
+                                      name: title
+                                      span:
+                                        start: 306
+                                        end: 311
+                                  span:
+                                    start: 306
+                                    end: 311
+                                args: []
+                            span:
+                              start: 306
+                              end: 313
+                    span:
+                      start: 288
+                      end: 314
+                span:
+                  start: 283
+                  end: 314
+            span:
+              start: 269
+              end: 314
+      span:
+        start: 205
+        end: 314
+  - Stmt:
+      kind:
+        ParallelFor:
+          var:
+            name: u
+            span:
+              start: 328
+              end: 329
+          iter:
+            kind:
+              List:
+                - kind:
+                    Int: 1
+                  span:
+                    start: 334
+                    end: 335
+                - kind:
+                    Int: 2
+                  span:
+                    start: 337
+                    end: 338
+            span:
+              start: 333
+              end: 339
+          opts: []
+          body:
+            stmts:
+              - kind:
+                  Expr:
+                    kind:
+                      Call:
+                        callee:
+                          kind:
+                            Ident:
+                              name: goto
+                              span:
+                                start: 345
+                                end: 349
+                          span:
+                            start: 345
+                            end: 349
+                        args:
+                          - name: ~
+                            value:
+                              kind:
+                                Ident:
+                                  name: u
+                                  span:
+                                    start: 350
+                                    end: 351
+                              span:
+                                start: 350
+                                end: 351
+                            span:
+                              start: 350
+                              end: 351
+                    span:
+                      start: 345
+                      end: 352
+                span:
+                  start: 345
+                  end: 352
+            span:
+              start: 345
+              end: 352
+      span:
+        start: 315
+        end: 352
+span:
+  start: 0
+  end: 353

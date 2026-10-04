@@ -1,0 +1,22 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_supervisor_body\", \".surf\"), src)"
+---
+[31merror:[0m unexpected statement in supervisor body
+   ╭─[ err_supervisor_body.surf:4:5 ]
+   │
+ 4 │     print(1)
+   │     ────┬───  
+   │         ╰───── not a `spawn` line
+   │ 
+   │ Help: a supervisor body may only contain `spawn Child(…)` lines and `parallel for … :` blocks of `spawn` lines
+───╯
+[31merror:[0m unexpected statement in supervisor body
+   ╭─[ err_supervisor_body.surf:6:9 ]
+   │
+ 6 │         goto(n)
+   │         ───┬───  
+   │            ╰───── not a `spawn` line
+   │ 
+   │ Help: a supervisor body may only contain `spawn Child(…)` lines and `parallel for … :` blocks of `spawn` lines
+───╯

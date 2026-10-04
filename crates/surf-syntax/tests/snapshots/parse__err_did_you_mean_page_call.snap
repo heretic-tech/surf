@@ -1,0 +1,31 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_did_you_mean_page_call\", \".surf\"), src)"
+---
+[31merror:[0m expected end of line, found integer `1`
+   ╭─[ err_did_you_mean_page_call.surf:1:6 ]
+   │
+ 1 │ page 1
+   │      ┬  
+   │      ╰── unexpected
+   │ 
+   │ Help: did you mean `page(1)`?
+───╯
+[31merror:[0m expected end of line, found string literal
+   ╭─[ err_did_you_mean_page_call.surf:2:7 ]
+   │
+ 2 │ click "#a"
+   │       ──┬─  
+   │         ╰─── unexpected
+   │ 
+   │ Help: did you mean `click("#a")`?
+───╯
+[31merror:[0m expected a name after `.`
+   ╭─[ err_did_you_mean_page_call.surf:3:6 ]
+   │
+ 3 │ page.1.goto("x")
+   │      ┬  
+   │      ╰── here
+   │ 
+   │ Help: did you mean `page(1)`?
+───╯

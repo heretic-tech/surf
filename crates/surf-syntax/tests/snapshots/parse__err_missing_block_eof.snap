@@ -1,0 +1,13 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_missing_block_eof\", \".surf\"), src)"
+---
+[31merror:[0m expected an indented block after ':'
+   ╭─[ err_missing_block_eof.surf:1:7 ]
+   │
+ 1 │ fn f():
+   │       ┬  
+   │       ╰── this ':' opens a block
+   │ 
+   │ Help: the block body must be on the following line(s), indented deeper
+───╯

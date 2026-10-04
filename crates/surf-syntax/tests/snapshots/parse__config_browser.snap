@@ -1,0 +1,425 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: program
+---
+items:
+  - Config:
+      kind:
+        name: browser
+        span:
+          start: 0
+          end: 7
+      alias: ~
+      props:
+        - key:
+            name: path
+            span:
+              start: 13
+              end: 17
+          value:
+            kind:
+              Str:
+                - Lit: /usr/bin/chromium
+            span:
+              start: 19
+              end: 38
+          span:
+            start: 13
+            end: 38
+        - key:
+            name: cdp
+            span:
+              start: 85
+              end: 88
+          value:
+            kind:
+              Ident:
+                name: pipe
+                span:
+                  start: 90
+                  end: 94
+            span:
+              start: 90
+              end: 94
+          span:
+            start: 85
+            end: 94
+        - key:
+            name: pool
+            span:
+              start: 150
+              end: 154
+          value:
+            kind:
+              Call:
+                callee:
+                  kind:
+                    Ident:
+                      name: env
+                      span:
+                        start: 156
+                        end: 159
+                  span:
+                    start: 156
+                    end: 159
+                args:
+                  - name: ~
+                    value:
+                      kind:
+                        Str:
+                          - Lit: BROWSER_POOL_URL
+                      span:
+                        start: 160
+                        end: 178
+                    span:
+                      start: 160
+                      end: 178
+            span:
+              start: 156
+              end: 179
+          span:
+            start: 150
+            end: 179
+        - key:
+            name: proxy
+            span:
+              start: 184
+              end: 189
+          value:
+            kind:
+              Str:
+                - Lit: "http://user:pass@host:8080"
+            span:
+              start: 191
+              end: 219
+          span:
+            start: 184
+            end: 219
+        - key:
+            name: proxies
+            span:
+              start: 224
+              end: 231
+          value:
+            kind:
+              List:
+                - kind:
+                    Str:
+                      - Lit: "http://a:1"
+                  span:
+                    start: 234
+                    end: 246
+                - kind:
+                    Str:
+                      - Lit: "http://b:1"
+                  span:
+                    start: 248
+                    end: 260
+            span:
+              start: 233
+              end: 261
+          span:
+            start: 224
+            end: 261
+        - key:
+            name: headless
+            span:
+              start: 266
+              end: 274
+          value:
+            kind:
+              Bool: false
+            span:
+              start: 276
+              end: 281
+          span:
+            start: 266
+            end: 281
+        - key:
+            name: virtual
+            span:
+              start: 286
+              end: 293
+          value:
+            kind:
+              Bool: true
+            span:
+              start: 295
+              end: 299
+          span:
+            start: 286
+            end: 299
+        - key:
+            name: size
+            span:
+              start: 304
+              end: 308
+          value:
+            kind:
+              Str:
+                - Lit: 1280x800
+            span:
+              start: 310
+              end: 320
+          span:
+            start: 304
+            end: 320
+        - key:
+            name: profile
+            span:
+              start: 325
+              end: 332
+          value:
+            kind:
+              Str:
+                - Lit: "./profiles/alice"
+            span:
+              start: 334
+              end: 352
+          span:
+            start: 325
+            end: 352
+        - key:
+            name: flags
+            span:
+              start: 357
+              end: 362
+          value:
+            kind:
+              List:
+                - kind:
+                    Str:
+                      - Lit: "--lang=en-US"
+                  span:
+                    start: 365
+                    end: 379
+            span:
+              start: 364
+              end: 380
+          span:
+            start: 357
+            end: 380
+        - key:
+            name: timeout
+            span:
+              start: 385
+              end: 392
+          value:
+            kind:
+              Duration:
+                secs: 30
+                nanos: 0
+            span:
+              start: 394
+              end: 397
+          span:
+            start: 385
+            end: 397
+        - key:
+            name: engine
+            span:
+              start: 402
+              end: 408
+          value:
+            kind:
+              Ident:
+                name: chrome
+                span:
+                  start: 410
+                  end: 416
+            span:
+              start: 410
+              end: 416
+          span:
+            start: 402
+            end: 416
+      span:
+        start: 0
+        end: 416
+  - Config:
+      kind:
+        name: browser
+        span:
+          start: 418
+          end: 425
+      alias:
+        name: work
+        span:
+          start: 426
+          end: 430
+      props:
+        - key:
+            name: cdp
+            span:
+              start: 436
+              end: 439
+          value:
+            kind:
+              Int: 9222
+            span:
+              start: 441
+              end: 445
+          span:
+            start: 436
+            end: 445
+        - key:
+            name: proxy
+            span:
+              start: 450
+              end: 455
+          value:
+            kind:
+              Map:
+                - - Ident:
+                      name: server
+                      span:
+                        start: 465
+                        end: 471
+                  - kind:
+                      Str:
+                        - Lit: "http://host:8080"
+                    span:
+                      start: 473
+                      end: 491
+                - - Ident:
+                      name: user
+                      span:
+                        start: 500
+                        end: 504
+                  - kind:
+                      Call:
+                        callee:
+                          kind:
+                            Ident:
+                              name: env
+                              span:
+                                start: 506
+                                end: 509
+                          span:
+                            start: 506
+                            end: 509
+                        args:
+                          - name: ~
+                            value:
+                              kind:
+                                Str:
+                                  - Lit: PROXY_USER
+                              span:
+                                start: 510
+                                end: 522
+                            span:
+                              start: 510
+                              end: 522
+                    span:
+                      start: 506
+                      end: 523
+            span:
+              start: 465
+              end: 523
+          span:
+            start: 450
+            end: 523
+      span:
+        start: 418
+        end: 523
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Method:
+              receiver:
+                kind:
+                  Method:
+                    receiver:
+                      kind:
+                        Ident:
+                          name: work
+                          span:
+                            start: 525
+                            end: 529
+                      span:
+                        start: 525
+                        end: 529
+                    name:
+                      name: page
+                      span:
+                        start: 530
+                        end: 534
+                    args:
+                      - name: ~
+                        value:
+                          kind:
+                            Int: 2
+                          span:
+                            start: 535
+                            end: 536
+                        span:
+                          start: 535
+                          end: 536
+                span:
+                  start: 525
+                  end: 537
+              name:
+                name: goto
+                span:
+                  start: 538
+                  end: 542
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: "https://example.com"
+                    span:
+                      start: 543
+                      end: 564
+                  span:
+                    start: 543
+                    end: 564
+          span:
+            start: 525
+            end: 565
+      span:
+        start: 525
+        end: 565
+  - Stmt:
+      kind:
+        Expr:
+          kind:
+            Method:
+              receiver:
+                kind:
+                  Ident:
+                    name: browser
+                    span:
+                      start: 566
+                      end: 573
+                span:
+                  start: 566
+                  end: 573
+              name:
+                name: goto
+                span:
+                  start: 574
+                  end: 578
+              args:
+                - name: ~
+                  value:
+                    kind:
+                      Str:
+                        - Lit: "https://example.com"
+                    span:
+                      start: 579
+                      end: 600
+                  span:
+                    start: 579
+                    end: 600
+          span:
+            start: 566
+            end: 601
+      span:
+        start: 566
+        end: 601
+span:
+  start: 0
+  end: 602
