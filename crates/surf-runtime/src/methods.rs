@@ -12,6 +12,7 @@ use indexmap::IndexMap;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
+use surf_browser::network::UrlPattern;
 use surf_browser::{ActionOptions, Browser, Cookie, DialogPolicy, Element, Page, WaitUntil};
 use surf_vm::{Args, Closure, RuntimeError, Value};
 
@@ -59,6 +60,13 @@ pub const PAGE_METHODS: &[&str] = &[
     "set_cookie",
     "set_cookies",
     "clear_cookies",
+    "export_cookies",
+    "import_cookies",
+    "local_storage",
+    "set_local_storage",
+    "clear_local_storage",
+    "block",
+    "wait_download",
     "viewport",
     "on_dialog",
     "dialogs",
@@ -224,6 +232,17 @@ fn cookie_to_value(c: &Cookie) -> Value {
     Value::map(m)
 }
 
+/// `cookies("example.com")`: the cookie's domain equals `wanted` or is a
+/// subdomain of it (leading dots ignored).
+fn cookie_domain_matches(domain: Option<&str>, wanted: &str) -> bool {
+    let Some(d) = domain else {
+        return false;
+    };
+    let d = d.trim_start_matches('.');
+    let w = wanted.trim_start_matches('.');
+    d == w || d.ends_with(&format!(".{w}"))
+}
+
 fn cookie_from_value(v: &Value, f: &str) -> Result<Cookie, RuntimeError> {
     let Value::Map(m) = v else {
         return Err(RuntimeError::new(format!(
@@ -256,15 +275,21 @@ fn cookie_from_value(v: &Value, f: &str) -> Result<Cookie, RuntimeError> {
 
 // ───────────────────────── eval(fn(): …) ─────────────────────────
 
-/// The JavaScript text of a zero-argument lambda: its body, verbatim
+/// The JavaScript text of a lambda: its body, verbatim
 /// (`docs/language.md` § 5.2). A block lambda becomes an immediately
-/// invoked arrow function.
+/// invoked arrow function; a lambda with parameters becomes an arrow
+/// function taking them (`eval(fn(a, b): a + b, 1, 2)`).
 pub fn lambda_js(rt: &Runtime, f: &Closure) -> Result<String, RuntimeError> {
-    if !f.func.params.is_empty() {
-        return Err(RuntimeError::new(
-            "eval(fn): the lambda takes no parameters — use eval(fn(): expr)",
-        ));
+    let params: Vec<String> = f.func.params.iter().map(|p| p.to_string()).collect();
+    let body = lambda_body_js(rt, f)?;
+    if params.is_empty() {
+        return Ok(body);
     }
+    Ok(format!("({}) => ({body})", params.join(", ")))
+}
+
+/// The lambda body as JavaScript (an expression, or an IIFE for a block).
+fn lambda_body_js(rt: &Runtime, f: &Closure) -> Result<String, RuntimeError> {
     let source = rt.source();
     let text = f.func.span.slice(&source.text);
     let rest = text.trim_start();
@@ -571,7 +596,15 @@ pub async fn page_method(
                     )))
                 }
             };
-            let v = page.eval(&js).await.map_err(err)?;
+            let v = if args.positional.len() > 1 {
+                // `eval(js, a, b)`: `js` is a function; call it with the
+                // arguments as JSON.
+                let call_args: Vec<serde_json::Value> =
+                    args.positional[1..].iter().map(Value::to_json).collect();
+                page.eval_fn(&js, call_args).await.map_err(err)?
+            } else {
+                page.eval(&js).await.map_err(err)?
+            };
             Ok(Value::from_json(v))
         }
         "screenshot" => {
@@ -617,19 +650,64 @@ pub async fn page_method(
             Ok(Value::Nil)
         }
         "cookies" => {
-            args.check_kwargs(f, &[])?;
+            args.check_kwargs(f, &["domain"])?;
+            let domain = match args.get(0) {
+                Some(Value::Str(s)) => Some(s.to_string()),
+                _ => kw_string(&args, "domain", f)?,
+            };
             let cookies = page.cookies().await.map_err(err)?;
-            Ok(Value::list(cookies.iter().map(cookie_to_value).collect()))
+            Ok(Value::list(
+                cookies
+                    .iter()
+                    .filter(|c| {
+                        domain
+                            .as_deref()
+                            .is_none_or(|d| cookie_domain_matches(c.domain.as_deref(), d))
+                    })
+                    .map(cookie_to_value)
+                    .collect(),
+            ))
         }
         "set_cookie" => {
-            args.check_kwargs(f, &[])?;
+            args.check_kwargs(
+                f,
+                &[
+                    "domain",
+                    "path",
+                    "url",
+                    "secure",
+                    "http_only",
+                    "expires",
+                    "same_site",
+                ],
+            )?;
             let mut cookie = if args.positional.len() >= 2 {
                 let name = string(&args, 0, f)?;
                 let value = string(&args, 1, f)?;
                 Cookie {
                     name,
                     value,
-                    ..Default::default()
+                    domain: kw_string(&args, "domain", f)?,
+                    path: kw_string(&args, "path", f)?,
+                    url: kw_string(&args, "url", f)?,
+                    secure: kw_bool(&args, "secure", f)?,
+                    http_only: kw_bool(&args, "http_only", f)?,
+                    same_site: kw_string(&args, "same_site", f)?,
+                    expires: match args.kw("expires") {
+                        None | Some(Value::Nil) => None,
+                        Some(Value::Duration(d)) => Some(
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|t| t.as_secs_f64())
+                                .unwrap_or(0.0)
+                                + d.as_secs_f64(),
+                        ),
+                        Some(v) => Some(v.as_f64().ok_or_else(|| {
+                            RuntimeError::new(format!(
+                                "{f}: `expires:` must be a unix time or a duration from now"
+                            ))
+                        })?),
+                    },
                 }
             } else {
                 cookie_from_value(args.require(0, f)?, f)?
@@ -659,6 +737,83 @@ pub async fn page_method(
             args.check_kwargs(f, &[])?;
             page.clear_cookies().await.map_err(err)?;
             Ok(Value::Nil)
+        }
+        "export_cookies" => {
+            args.check_kwargs(f, &[])?;
+            let path = string(&args, 0, f)?;
+            let cookies = page.cookies().await.map_err(err)?;
+            let json = serde_json::to_string_pretty(&cookies)
+                .map_err(|e| RuntimeError::new(format!("{f}: {e}")))?;
+            tokio::fs::write(&path, json)
+                .await
+                .map_err(|e| RuntimeError::new(format!("{f}({path}): {e}")).with_cause(e))?;
+            Ok(Value::Int(cookies.len() as i64))
+        }
+        "import_cookies" => {
+            args.check_kwargs(f, &[])?;
+            let path = string(&args, 0, f)?;
+            let text = tokio::fs::read_to_string(&path)
+                .await
+                .map_err(|e| RuntimeError::new(format!("{f}({path}): {e}")).with_cause(e))?;
+            let cookies: Vec<Cookie> = serde_json::from_str(&text).map_err(|e| {
+                RuntimeError::new(format!("{f}({path}): expected a JSON list of cookies: {e}"))
+            })?;
+            if !cookies.is_empty() {
+                page.set_cookies(&cookies).await.map_err(err)?;
+            }
+            Ok(Value::Int(cookies.len() as i64))
+        }
+        "local_storage" => {
+            args.check_kwargs(f, &[])?;
+            let m = page.local_storage().await.map_err(err)?;
+            Ok(Value::from_json(serde_json::Value::Object(m)))
+        }
+        "set_local_storage" => {
+            args.check_kwargs(f, &[])?;
+            let entries = match args.require(0, f)? {
+                Value::Map(m) => m
+                    .borrow()
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_json()))
+                    .collect(),
+                other => {
+                    return Err(RuntimeError::new(format!(
+                        "{f}: expected a map, got {}",
+                        other.type_name()
+                    )))
+                }
+            };
+            page.set_local_storage(entries).await.map_err(err)?;
+            Ok(Value::Nil)
+        }
+        "clear_local_storage" => {
+            args.check_kwargs(f, &[])?;
+            page.clear_local_storage().await.map_err(err)?;
+            Ok(Value::Nil)
+        }
+        "block" => {
+            args.check_kwargs(f, &[])?;
+            let patterns = match args.get(0) {
+                None | Some(Value::Nil) => vec![],
+                Some(v) => str_list(v, f)?,
+            };
+            let mut chrome = Vec::with_capacity(patterns.len());
+            for p in &patterns {
+                if p.starts_with("re:") {
+                    return Err(RuntimeError::new(format!(
+                        "{f}: {p:?} — Chrome's URL blocker only takes `*` globs, not re: patterns"
+                    )));
+                }
+                chrome.push(UrlPattern::glob(p).chrome_pattern());
+            }
+            page.set_blocked_urls(chrome).await.map_err(err)?;
+            Ok(Value::Nil)
+        }
+        "wait_download" => {
+            args.check_kwargs(f, &["timeout"])?;
+            let timeout = kw_duration(&args, "timeout", f)?.unwrap_or_else(|| page.timeout());
+            let path = browser.wait_download(page, timeout).await.map_err(err)?;
+            Ok(Value::str(path.to_string_lossy()))
         }
         "viewport" => {
             args.check_kwargs(f, &[])?;

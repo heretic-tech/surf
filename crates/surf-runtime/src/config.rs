@@ -78,6 +78,9 @@ impl BrowserConfig {
                 ("timeout", v) => bad("timeout", v, "a duration such as 30s"),
                 ("engine", Value::Str(s)) => launch.engine = s.to_string(),
                 ("engine", v) => bad("engine", v, "chrome"),
+                ("downloads", Value::Str(s)) => launch.downloads = Some(s.to_string().into()),
+                ("downloads", Value::Nil) => {}
+                ("downloads", v) => bad("downloads", v, "a directory path"),
                 _ => {}
             }
         }
@@ -177,8 +180,13 @@ mod tests {
             ("flags", Value::list(vec![Value::str("--lang=en")])),
             ("timeout", Value::Duration(Duration::from_secs(5))),
             ("engine", Value::str("chrome")),
+            ("downloads", Value::str("./dl")),
         ]));
         assert!(cfg.problems.is_empty(), "{:?}", cfg.problems);
+        assert_eq!(
+            cfg.launch.downloads.as_deref(),
+            Some(std::path::Path::new("./dl"))
+        );
         assert_eq!(cfg.launch.cdp, CdpMode::Port(9222));
         assert_eq!(cfg.pool.as_deref(), Some("wss://pool"));
         assert_eq!(cfg.launch.size, (800, 600));

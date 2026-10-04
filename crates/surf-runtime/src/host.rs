@@ -285,6 +285,17 @@ impl Runtime {
         self.handlers_for(HandlerEvent::Navigation)
     }
 
+    /// Every declared page-level handler (all but `message`), in
+    /// declaration order.
+    pub fn page_handlers(&self) -> Vec<Rc<HandlerDecl>> {
+        self.handlers
+            .borrow()
+            .iter()
+            .filter(|h| h.event.is_page_level())
+            .cloned()
+            .collect()
+    }
+
     fn handlers_for(&self, event: HandlerEvent) -> Vec<Rc<HandlerDecl>> {
         self.handlers
             .borrow()
@@ -477,27 +488,19 @@ impl Host for Runtime {
                     }
                     None => self.warn("on message: only works inside an actor body; ignored"),
                 },
-                Some(ev @ (HandlerEvent::ElementAppears | HandlerEvent::Navigation)) => {
-                    self.handlers.borrow_mut().push(Rc::new(HandlerDecl {
-                        event: ev,
-                        args,
-                        body,
-                    }));
-                    for b in self.live_browsers() {
-                        self.instrument(&b);
+                Some(ev) => match HandlerDecl::new(ev, args, body) {
+                    Ok(decl) => {
+                        self.handlers.borrow_mut().push(Rc::new(decl));
+                        for b in self.live_browsers() {
+                            self.instrument(&b);
+                        }
                     }
-                }
-                Some(ev) => {
-                    self.warn(&format!(
-                        "on {}: is not implemented yet (task 9, network hooks); the handler never fires",
-                        ev.name()
-                    ));
-                    self.handlers.borrow_mut().push(Rc::new(HandlerDecl {
-                        event: ev,
-                        args,
-                        body,
-                    }));
-                }
+                    Err(e) => self.warn(&format!(
+                        "on {}: {}; the handler is ignored",
+                        ev.name(),
+                        e.message
+                    )),
+                },
                 None => self.warn(&format!("unknown handler event `{event}` ignored")),
             },
             Declaration::Task {

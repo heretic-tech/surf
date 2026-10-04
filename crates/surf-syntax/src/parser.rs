@@ -35,8 +35,19 @@ use crate::token::{StrPart, Token, TokenKind, KEYWORDS};
 
 /// Keys accepted in a `browser:` block.
 pub const BROWSER_PROPS: &[&str] = &[
-    "path", "cdp", "pool", "proxy", "proxies", "headless", "virtual", "size", "profile", "flags",
-    "timeout", "engine",
+    "path",
+    "cdp",
+    "pool",
+    "proxy",
+    "proxies",
+    "headless",
+    "virtual",
+    "size",
+    "profile",
+    "flags",
+    "timeout",
+    "engine",
+    "downloads",
 ];
 /// Properties accepted at the top of a `task` (and `actor`) body.
 pub const TASK_PROPS: &[&str] = &["retry", "on_fail", "timeout", "fresh"];
@@ -44,13 +55,15 @@ pub const TASK_PROPS: &[&str] = &["retry", "on_fail", "timeout", "fresh"];
 pub const SUPERVISOR_PROPS: &[&str] = &["strategy", "max_restarts", "within"];
 /// Options accepted at the top of a `parallel for` body.
 pub const PARALLEL_FOR_PROPS: &[&str] = &["limit", "fail_fast"];
-/// Events an `on …:` handler may subscribe to.
+/// Events an `on …:` handler may subscribe to. `intercept` is also
+/// spelled without `on`: `intercept(pattern):` at the top level.
 pub const HANDLER_EVENTS: &[&str] = &[
     "element_appears",
     "navigation",
     "dialog",
     "request",
     "response",
+    "intercept",
     "message",
 ];
 
@@ -360,11 +373,44 @@ impl<'src> Parser<'src> {
             TokenKind::Actor => Item::Actor(self.parse_actor()?),
             TokenKind::Supervisor => Item::Supervisor(self.parse_supervisor()?),
             TokenKind::On => Item::Handler(self.parse_handler(Ctx::TopLevel)?),
+            TokenKind::Ident(s) if s == "intercept" && self.is_intercept_block() => {
+                let event = self.ident("intercept")?;
+                Item::Handler(self.parse_handler_rest(event.span, event, Ctx::TopLevel)?)
+            }
             TokenKind::Fn if !matches!(self.peek_n(1), TokenKind::LParen) => {
                 Item::Fn(self.parse_fn_decl()?)
             }
             _ => Item::Stmt(self.parse_stmt(Ctx::TopLevel)?),
         })
+    }
+
+    /// `intercept(` … `):` — a handler block rather than a call statement.
+    /// Newlines are suppressed inside the parentheses, so the matching `)`
+    /// is followed directly by `:` when this is a block.
+    fn is_intercept_block(&self) -> bool {
+        if !matches!(self.peek_n(1), TokenKind::LParen) {
+            return false;
+        }
+        let mut depth = 0usize;
+        let mut i = self.pos + 1;
+        while let Some(t) = self.tokens.get(i) {
+            match &t.kind {
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => depth += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return matches!(
+                            self.tokens.get(i + 1).map(|t| &t.kind),
+                            Some(TokenKind::Colon)
+                        );
+                    }
+                }
+                TokenKind::Newline | TokenKind::Eof => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+        false
     }
 
     fn is_config_header(&self) -> bool {
@@ -507,6 +553,12 @@ impl<'src> Parser<'src> {
     fn parse_handler(&mut self, ctx: Ctx) -> PResult<HandlerDecl> {
         let start = self.expect(&TokenKind::On, "`on`")?;
         let event = self.ident("an event name")?;
+        self.parse_handler_rest(start, event, ctx)
+    }
+
+    /// The arguments and body after the event name (`on <event>` or the
+    /// bare `intercept` form).
+    fn parse_handler_rest(&mut self, start: Span, event: Ident, ctx: Ctx) -> PResult<HandlerDecl> {
         let mut args = Vec::new();
         if self.at(&TokenKind::LParen) {
             for arg in self.parse_call_args()? {
@@ -1280,8 +1332,14 @@ impl<'src> Parser<'src> {
         Ok(expr)
     }
 
-    /// The name after a `.`, with hints for `page.1` / `xs.0`.
+    /// The name after a `.`, with hints for `page.1` / `xs.0`. Keywords
+    /// are accepted as member names (`event.continue()`).
     fn member_name(&mut self, receiver: &Expr) -> PResult<Ident> {
+        if let Some(kw) = self.peek().keyword_text() {
+            let name = kw.to_string();
+            let span = self.advance().span;
+            return Ok(Ident { name, span });
+        }
         if let TokenKind::Int(n) = self.peek() {
             let n = *n;
             let help = match &receiver.kind {
