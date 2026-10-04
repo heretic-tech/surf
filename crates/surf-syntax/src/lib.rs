@@ -33,8 +33,17 @@ pub use span::Span;
 
 /// Parse a complete Surf program.
 ///
-/// `name` is used only for diagnostics (file path or `<stdin>`).
+/// `name` is used only for diagnostics (file path or `<stdin>`). Every
+/// error found is returned together; the result is `Err` if there was at
+/// least one.
 pub fn parse(name: &str, source: &str) -> Result<Program, Diagnostics> {
     let tokens = lexer::lex(name, source)?;
     parser::parse_tokens(name, source, tokens)
+}
+
+/// Parse a single expression (no statements, no layout) — for the REPL
+/// and tests. The whole of `source` must be the expression.
+pub fn parse_expr(name: &str, source: &str) -> Result<ast::Expr, Diagnostics> {
+    let tokens = lexer::lex_expr(name, source, Span::new(0, source.len() as u32))?;
+    parser::Parser::new(name, source, tokens).parse_expression()
 }

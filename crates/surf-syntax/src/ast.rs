@@ -5,11 +5,11 @@
 //! The language reference is `docs/language.md`.
 
 use crate::span::Span;
-use crate::token::StrPart;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// An identifier with its span.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Ident {
     /// The name.
     pub name: String,
@@ -18,7 +18,7 @@ pub struct Ident {
 }
 
 /// A whole source file.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Program {
     /// Top-level items in source order.
     pub items: Vec<Item>,
@@ -29,7 +29,7 @@ pub struct Program {
 /// Top-level items. Declarations (`browser:`, `fn`, `task`, `actor`,
 /// `supervisor`, `on …:`) are hoisted and registered with the host before the
 /// first statement runs; statements execute in order.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Item {
     /// `browser:` / `browser work:` config block (declarative; nothing launches).
     Config(ConfigBlock),
@@ -49,7 +49,7 @@ pub enum Item {
 
 /// `key: value` line inside a config / task / actor / supervisor /
 /// `parallel for` header region.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Property {
     /// Property key.
     pub key: Ident,
@@ -61,7 +61,7 @@ pub struct Property {
 }
 
 /// `browser:` or `browser <alias>:` block.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConfigBlock {
     /// The config kind — `browser` in v0.1.
     pub kind: Ident,
@@ -74,7 +74,7 @@ pub struct ConfigBlock {
 }
 
 /// A function / task / actor parameter.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Param {
     /// Parameter name.
     pub name: Ident,
@@ -85,7 +85,7 @@ pub struct Param {
 }
 
 /// `fn name(params):` declaration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FnDecl {
     /// Function name.
     pub name: Ident,
@@ -98,7 +98,7 @@ pub struct FnDecl {
 }
 
 /// `task name(params):` declaration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaskDecl {
     /// Task name.
     pub name: Ident,
@@ -114,7 +114,7 @@ pub struct TaskDecl {
 }
 
 /// `actor Name(params):` declaration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActorDecl {
     /// Actor name.
     pub name: Ident,
@@ -129,7 +129,7 @@ pub struct ActorDecl {
 }
 
 /// `supervisor Name:` declaration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SupervisorDecl {
     /// Supervisor name.
     pub name: Ident,
@@ -142,7 +142,7 @@ pub struct SupervisorDecl {
 }
 
 /// `on <event>(<args>):` handler block.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HandlerDecl {
     /// Event name: `element_appears`, `navigation`, `dialog`, `request`,
     /// `response`, `message`.
@@ -156,7 +156,7 @@ pub struct HandlerDecl {
 }
 
 /// An indented block of statements.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Block {
     /// Statements in order.
     pub stmts: Vec<Stmt>,
@@ -165,7 +165,7 @@ pub struct Block {
 }
 
 /// A statement with span.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Stmt {
     /// Statement payload.
     pub kind: StmtKind,
@@ -174,7 +174,7 @@ pub struct Stmt {
 }
 
 /// Statement kinds.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum StmtKind {
     /// Expression statement (usually a call).
     Expr(Expr),
@@ -244,8 +244,6 @@ pub enum StmtKind {
     Emit(Expr),
     /// `exit` / `exit(code)`.
     Exit(Option<Expr>),
-    /// `spawn f(args)` — the expression must be a call.
-    Spawn(Expr),
     /// Nested `fn` declaration (closures capture their environment).
     Fn(FnDecl),
     /// Nested `on …:` handler (allowed inside actor bodies).
@@ -253,7 +251,7 @@ pub enum StmtKind {
 }
 
 /// An expression with span.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Expr {
     /// Expression payload.
     pub kind: ExprKind,
@@ -262,7 +260,7 @@ pub struct Expr {
 }
 
 /// Unary operators.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UnaryOp {
     /// `-x`
     Neg,
@@ -271,7 +269,7 @@ pub enum UnaryOp {
 }
 
 /// Binary operators, in precedence order from lowest (`Or`) to highest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BinaryOp {
     /// `or` (short-circuit)
     Or,
@@ -302,7 +300,7 @@ pub enum BinaryOp {
 }
 
 /// A call argument: positional or `name: value`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Arg {
     /// Keyword, if any.
     pub name: Option<Ident>,
@@ -313,18 +311,29 @@ pub struct Arg {
 }
 
 /// Map literal key.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MapKey {
     /// Bare identifier key: `{a: 1}`.
     Ident(Ident),
     /// String key: `{"b": 2}` (may interpolate).
-    Str(Vec<StrPart>, Span),
+    Str(Vec<StrSegment>, Span),
     /// Computed key: `{[expr]: 3}`.
     Expr(Expr),
 }
 
+/// One segment of a parsed string literal: literal text or an
+/// interpolated expression (`"a {x} b"` → `[Lit("a "), Expr(x), Lit(" b")]`).
+/// An empty string has no segments.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum StrSegment {
+    /// Literal text, escapes already resolved.
+    Lit(String),
+    /// `{expr}` — parsed with the full expression grammar.
+    Expr(Expr),
+}
+
 /// Lambda body: single expression or block.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LambdaBody {
     /// `fn(a): a + 1`
     Expr(Box<Expr>),
@@ -333,7 +342,7 @@ pub enum LambdaBody {
 }
 
 /// Expression kinds.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ExprKind {
     /// `nil`
     Nil,
@@ -343,8 +352,8 @@ pub enum ExprKind {
     Int(i64),
     /// Float literal.
     Float(f64),
-    /// String literal with `{expr}` interpolation parts.
-    Str(Vec<StrPart>),
+    /// String literal with `{expr}` interpolation segments.
+    Str(Vec<StrSegment>),
     /// Duration literal.
     Duration(Duration),
     /// Variable reference.
@@ -415,4 +424,8 @@ pub enum ExprKind {
         /// Body.
         body: LambdaBody,
     },
+    /// `spawn callee(args)` — runs the call concurrently and evaluates to a
+    /// task handle. The operand is always a `Call` or `Method` expression.
+    /// As a bare statement (`spawn Scout()`) the handle is discarded.
+    Spawn(Box<Expr>),
 }
