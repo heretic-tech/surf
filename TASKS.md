@@ -229,12 +229,14 @@ seam, not beside it.
       eval (above) lands.
 
 ## Release / docs (step 11)
-- [ ] `Cargo.toml` says `repository = "https://github.com/heretic-tech/surf"`
-      while the private remote is `0xchasercat/surf`. The `dist`
-      installers, the README badges and the install one-liners all derive
-      from the `repository` field; if the public repo lives elsewhere,
-      change that one field, run `dist generate`, and fix the two README
-      badge URLs in the same commit.
+- [ ] Move the repo to `heretic-tech/surf`. `repository` in `Cargo.toml`,
+      the README badges and the `curl | sh` / `irm | iex` one-liners now
+      point at the real remote, `0xchasercat/surf` (the org is visible to
+      the `0xchasercat` account but `gh repo create heretic-tech/surf` is
+      refused — no `CreateRepository` permission). When an org owner
+      creates/transfers the repo: change the one `repository` field, run
+      `dist generate` (release.yml was unchanged by the last run), fix the
+      four README URLs, and re-point `origin`.
 - [ ] `.github/workflows/release.yml` has never run: the first `v0.1.0`
       tag is the first exercise of the five-target matrix (the
       `aarch64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` builds in

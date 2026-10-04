@@ -1,7 +1,7 @@
 # Surf
 
-[![ci](https://github.com/heretic-tech/surf/actions/workflows/ci.yml/badge.svg)](https://github.com/heretic-tech/surf/actions/workflows/ci.yml)
-[![release](https://github.com/heretic-tech/surf/actions/workflows/release.yml/badge.svg)](https://github.com/heretic-tech/surf/actions/workflows/release.yml)
+[![ci](https://github.com/0xchasercat/surf/actions/workflows/ci.yml/badge.svg)](https://github.com/0xchasercat/surf/actions/workflows/ci.yml)
+[![release](https://github.com/0xchasercat/surf/actions/workflows/release.yml/badge.svg)](https://github.com/0xchasercat/surf/actions/workflows/release.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A tiny scripting language and runtime for driving Chrome over raw CDP with
@@ -78,11 +78,11 @@ Release binaries (macOS arm64 / x86_64, Linux x86_64 / arm64, Windows
 x86_64):
 
 ```
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/heretic-tech/surf/releases/latest/download/surf-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/0xchasercat/surf/releases/latest/download/surf-cli-installer.sh | sh
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://github.com/heretic-tech/surf/releases/latest/download/surf-cli-installer.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/0xchasercat/surf/releases/latest/download/surf-cli-installer.ps1 | iex"
 ```
 
 Or from source with a Rust toolchain (≥ 1.85):
