@@ -1014,10 +1014,12 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-tungstenite",
  "tracing",
+ "tracing-subscriber",
  "windows-sys 0.61.2",
 ]
 

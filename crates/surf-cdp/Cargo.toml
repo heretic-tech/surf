@@ -8,6 +8,8 @@ repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 
+build = "build.rs"
+
 [dependencies]
 tokio = { workspace = true }
 tokio-tungstenite = { workspace = true }
@@ -23,5 +25,10 @@ libc = { workspace = true }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true }
 
+[build-dependencies]
+serde_json = { workspace = true }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
+tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }
