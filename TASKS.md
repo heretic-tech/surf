@@ -237,13 +237,40 @@ seam, not beside it.
       creates/transfers the repo: change the one `repository` field, run
       `dist generate` (release.yml was unchanged by the last run), fix the
       four README URLs, and re-point `origin`.
+- [ ] **GitHub Actions never runs for `0xchasercat` repos** — this is
+      what blocks the v0.1.0 release. Tag `v0.1.0` (annotated, on
+      `0009cf8`) is pushed and `release.yml` is registered, but no run
+      was ever created. Evidence (2026-10-05, `gh api`):
+      `repos/0xchasercat/surf/actions/runs` → `total_count: 0` after four
+      pushes to `main` plus the tag; `actions/permissions` →
+      `{"enabled":true,"allowed_actions":"all"}`; `actions/workflows` →
+      both `ci` and `Release` `state: active`. The same holds for every
+      other repo on the account: `aeon` (private, 18 workflows, 0 runs)
+      and `butterfly` (public, 1 workflow, 0 runs) — so it is an
+      account-level Actions suspension (billing / verification), not a
+      workflow bug. Resolutions, either one: (a) fix it at
+      github.com/settings/billing (Actions spending limit / payment
+      method), or (b) transfer the repo to `heretic-tech/surf` (where
+      Actions demonstrably runs). Then re-trigger the release with
+      `git push origin :refs/tags/v0.1.0 && git push origin v0.1.0`.
+      Do not `gh release create` by hand — `dist host --steps=create`
+      owns the release.
 - [ ] `.github/workflows/release.yml` has never run: the first `v0.1.0`
       tag is the first exercise of the five-target matrix (the
       `aarch64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` builds in
       particular — Windows has no CI job at all, see the pipe-transport
-      item above). Only the host archive
-      (`surf-cli-aarch64-apple-darwin.tar.xz`, 2.0 MB, `surf` 6.9 MB
-      unpacked) was built locally with `dist build --artifacts=local`.
+      item above). Local proof at the tag: `dist plan --tag=v0.1.0`
+      lists all five archives + `source.tar.gz`, `surf-cli-installer.sh`,
+      `surf-cli-installer.ps1`, `sha256.sum`; `dist build
+      --artifacts=local --target=aarch64-apple-darwin` produced
+      `surf-cli-aarch64-apple-darwin.tar.xz` (2,017,628 B, sha256
+      `442ec050…05b54d`, `surf` 6,885,648 B unpacked, Mach-O arm64);
+      the extracted binary answers `surf --version` → `surf 0.1.0` and
+      `surf doctor` → launch ok (Chrome 154.0.8037.95, pipe, first
+      `Browser.getVersion` in 373 ms, round trip 9 ms, shutdown 110 ms).
+      `dist build --artifacts=global` produced `source.tar.gz`
+      (562,072 B), `surf-cli-installer.sh` (53,387 B),
+      `surf-cli-installer.ps1` (22,255 B), `sha256.sum`.
 - [ ] `cargo publish` (crates.io) is not part of the pipeline; the
       procedure in `AGENTS.md` lists the order. `cargo install surf-cli`
       in the README is aspirational until the first publish.
