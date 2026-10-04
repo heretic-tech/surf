@@ -1,0 +1,12 @@
+# A browser-level proxy that demands Basic auth: credentials stay off the
+# command line and are supplied through Fetch.authRequired. The fixture's
+# /proxy-echo names the proxy that forwarded the request.
+browser:
+    proxy: env("SURF_E2E_PROXY_AUTH")
+    flags: ["--host-resolver-rules=MAP surf.test 127.0.0.1"]
+
+base = env("SURF_E2E_PROXIED_BASE")
+goto("{base}/proxy-echo")
+print(text("body"))
+goto("{base}/forms.html")
+print(title())

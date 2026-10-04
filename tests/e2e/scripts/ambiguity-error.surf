@@ -1,0 +1,6 @@
+# An uncaught ambiguity error: several pages are open and a bare action
+# does not say which.
+base = env("SURF_E2E_BASE")
+page(1).goto("{base}/forms.html")
+page("login").goto("{base}/text.html")
+click("#submit")

@@ -1,19 +1,34 @@
 //! End-to-end tests through the built `surf` binary against a real Chrome
 //! and the in-process fixture server (`surf-testserver`).
 //!
-//! `tests/e2e/scripts/<name>.surf` is run with `surf run --headless`; its
-//! stdout must equal `<name>.out` byte for byte and the exit code must be
-//! `0` (or the number in `<name>.code` when present). Scripts reach the
-//! fixture server through `env("SURF_E2E_BASE")`, a scratch directory
-//! through `env("SURF_E2E_TMP")`, two forward-proxy stubs through
-//! `env("SURF_E2E_PROXY_A")` / `env("SURF_E2E_PROXY_B")` (they tag what
-//! they forward, see `surf_testserver::Proxy`) and the fixture server under
-//! a non-loopback host name through `env("SURF_E2E_PROXIED_BASE")`
-//! (`http://surf.test:<port>` — Chrome never proxies loopback hosts).
+//! `cargo test --test e2e` is the one command (the target is declared in
+//! `crates/surf-cli/Cargo.toml` with its path pointing here, so
+//! `CARGO_BIN_EXE_surf` resolves). Every `tests/e2e/scripts/<name>.surf`
+//! is run with `surf run --headless` (`SURF_E2E_HEADED=1` forces headed);
+//! its stdout must equal `<name>.out` after normalisation and the exit
+//! code must be `0` (or the number in `<name>.code`). When `<name>.err`
+//! exists, stderr must match it too (error-message snapshots). A mismatch
+//! prints a unified diff. `SURF_E2E_FILTER=<substring>` runs a subset;
+//! `SURF_E2E_UPDATE=1` rewrites the expectation files (review the diff).
+//!
+//! Normalisation replaces volatile text before comparing: the scratch
+//! directory (`<TMP>`), the scripts directory (`<SCRIPTS>`), the fixture
+//! base URLs (`<BASE>`, `<PROXIED_BASE>`), the proxy URLs (`<PROXY_A>`,
+//! `<PROXY_B>`, `<PROXY_AUTH>`), unix timestamps (`<TS>`) and elapsed
+//! times such as `after 0.3s` (`after <T>`).
+//!
+//! Scripts reach the fixture server through `env("SURF_E2E_BASE")`, a
+//! scratch directory through `env("SURF_E2E_TMP")`, two plain forward-proxy
+//! stubs through `env("SURF_E2E_PROXY_A")` / `env("SURF_E2E_PROXY_B")`, an
+//! authenticating one (`user:pass@` in the URL) through
+//! `env("SURF_E2E_PROXY_AUTH")` (they tag what they forward, see
+//! `surf_testserver::Proxy`) and the fixture server under a non-loopback
+//! host name through `env("SURF_E2E_PROXIED_BASE")` (`http://surf.test:<port>`
+//! — Chrome never proxies loopback hosts).
 //!
 //! Skip (with a printed message) when no Chrome is found; `SURF_CHROME`
 //! overrides discovery. These MUST run on developer Macs and in the `e2e`
-//! CI job.
+//! CI job (under `xvfb-run` on Linux).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -35,6 +50,7 @@ struct Server {
     fixture: Fixture,
     proxy_a: Proxy,
     proxy_b: Proxy,
+    proxy_auth: Proxy,
 }
 
 impl Server {
@@ -47,11 +63,13 @@ impl Server {
         let fixture = rt.block_on(Fixture::start());
         let proxy_a = rt.block_on(Proxy::start("A"));
         let proxy_b = rt.block_on(Proxy::start("B"));
+        let proxy_auth = rt.block_on(Proxy::start_with_auth("AUTH", "surf", "s3cret"));
         Server {
             _rt: rt,
             fixture,
             proxy_a,
             proxy_b,
+            proxy_auth,
         }
     }
 
@@ -68,11 +86,15 @@ struct Outcome {
     code: i32,
 }
 
+fn headed() -> bool {
+    std::env::var("SURF_E2E_HEADED").is_ok_and(|v| !v.is_empty() && v != "0")
+}
+
 fn run_surf(chrome: &Path, server: &Server, tmp: &Path, script: &Path, extra: &[&str]) -> Outcome {
     let out = Command::new(env!("CARGO_BIN_EXE_surf"))
         .arg("run")
         .arg(script)
-        .arg("--headless")
+        .arg(if headed() { "--headed" } else { "--headless" })
         .arg("--timeout")
         .arg("15s")
         .args(extra)
@@ -81,9 +103,11 @@ fn run_surf(chrome: &Path, server: &Server, tmp: &Path, script: &Path, extra: &[
         .env("SURF_E2E_PROXIED_BASE", server.proxied_base())
         .env("SURF_E2E_PROXY_A", &server.proxy_a.url)
         .env("SURF_E2E_PROXY_B", &server.proxy_b.url)
+        .env("SURF_E2E_PROXY_AUTH", &server.proxy_auth.url)
         .env("SURF_E2E_TMP", tmp)
         .env("NO_COLOR", "1")
         .env_remove("SURF_TRACE_CDP")
+        .current_dir(tmp)
         .output()
         .expect("run surf");
     Outcome {
@@ -91,6 +115,46 @@ fn run_surf(chrome: &Path, server: &Server, tmp: &Path, script: &Path, extra: &[
         stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
         code: out.status.code().unwrap_or(-1),
     }
+}
+
+/// Replace volatile text (paths, ports, timestamps, elapsed times).
+fn normalise(text: &str, server: &Server, tmp: &Path) -> String {
+    let scripts = scripts_dir()
+        .canonicalize()
+        .unwrap_or_else(|_| scripts_dir());
+    let tmp_canon = tmp.canonicalize().unwrap_or_else(|_| tmp.to_path_buf());
+    let mut s = text
+        .replace(&tmp_canon.to_string_lossy().into_owned(), "<TMP>")
+        .replace(&tmp.to_string_lossy().into_owned(), "<TMP>")
+        .replace(&scripts.to_string_lossy().into_owned(), "<SCRIPTS>")
+        .replace(&scripts_dir().to_string_lossy().into_owned(), "<SCRIPTS>")
+        .replace(&server.proxied_base(), "<PROXIED_BASE>")
+        .replace(&server.fixture.base, "<BASE>")
+        .replace(&server.proxy_auth.url, "<PROXY_AUTH>")
+        .replace(&server.proxy_a.url, "<PROXY_A>")
+        .replace(&server.proxy_b.url, "<PROXY_B>");
+    // Proxy URLs without credentials (as Chrome / the runtime report them).
+    for (p, tag) in [
+        (&server.proxy_a, "<PROXY_A>"),
+        (&server.proxy_b, "<PROXY_B>"),
+        (&server.proxy_auth, "<PROXY_AUTH>"),
+    ] {
+        if let Some(host) = p.url.rsplit('@').next() {
+            s = s.replace(&format!("http://{host}"), tag);
+        }
+    }
+    let ts = regex::Regex::new(r"\b1[0-9]{9}(\.[0-9]+)?\b").unwrap();
+    let s = ts.replace_all(&s, "<TS>").into_owned();
+    let elapsed = regex::Regex::new(r"\b(after|in|waited) [0-9]+(\.[0-9]+)?(ms|s)\b").unwrap();
+    elapsed.replace_all(&s, "$1 <T>").into_owned()
+}
+
+fn unified_diff(name: &str, expected: &str, actual: &str) -> String {
+    similar::TextDiff::from_lines(expected, actual)
+        .unified_diff()
+        .context_radius(3)
+        .header(&format!("{name} (expected)"), &format!("{name} (actual)"))
+        .to_string()
 }
 
 #[test]
@@ -108,37 +172,82 @@ fn scripts_match_expected_output() {
     };
     let server = Server::start();
     let tmp = tempfile::tempdir().expect("tempdir");
+    let filter = std::env::var("SURF_E2E_FILTER").unwrap_or_default();
+    let update = std::env::var("SURF_E2E_UPDATE").is_ok_and(|v| !v.is_empty() && v != "0");
     let mut scripts: Vec<PathBuf> = std::fs::read_dir(scripts_dir())
         .expect("tests/e2e/scripts")
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "surf"))
+        .filter(|p| {
+            filter.is_empty()
+                || p.file_stem()
+                    .is_some_and(|s| s.to_string_lossy().contains(&filter))
+        })
         .collect();
     scripts.sort();
     assert!(!scripts.is_empty(), "no e2e scripts found");
     let mut failures = Vec::new();
     for script in &scripts {
         let name = script.file_stem().unwrap().to_string_lossy().into_owned();
-        let expected = std::fs::read_to_string(script.with_extension("out"))
-            .unwrap_or_else(|_| panic!("missing {name}.out"));
+        // Each script gets a clean scratch directory (downloads, exports).
+        let scratch = tmp.path().join(&name);
+        std::fs::create_dir_all(&scratch).unwrap();
         let expected_code: i32 = std::fs::read_to_string(script.with_extension("code"))
             .ok()
             .and_then(|s| s.trim().parse().ok())
             .unwrap_or(0);
         let started = std::time::Instant::now();
-        let r = run_surf(&chrome, &server, tmp.path(), script, &[]);
+        let r = run_surf(&chrome, &server, &scratch, script, &[]);
+        let stdout = normalise(&r.stdout, &server, &scratch);
+        let stderr = normalise(&r.stderr, &server, &scratch);
         eprintln!(
             "e2e {name}: exit {} in {:.1}s",
             r.code,
             started.elapsed().as_secs_f64()
         );
-        if r.stdout != expected || r.code != expected_code {
-            failures.push(format!(
-                "--- {name}: exit {} (expected {expected_code})\n--- stdout:\n{}--- expected:\n{}--- stderr:\n{}",
-                r.code, r.stdout, expected, r.stderr
+        if update {
+            std::fs::write(script.with_extension("out"), &stdout).unwrap();
+            if script.with_extension("err").exists() {
+                std::fs::write(script.with_extension("err"), &stderr).unwrap();
+            }
+            continue;
+        }
+        let expected = std::fs::read_to_string(script.with_extension("out"))
+            .unwrap_or_else(|_| panic!("missing {name}.out"));
+        let expected_err = std::fs::read_to_string(script.with_extension("err")).ok();
+        let mut problems = Vec::new();
+        if r.code != expected_code {
+            problems.push(format!("exit code {} (expected {expected_code})", r.code));
+        }
+        if stdout != expected {
+            problems.push(format!(
+                "stdout differs:\n{}",
+                unified_diff(&format!("{name}.out"), &expected, &stdout)
             ));
         }
+        if let Some(e) = &expected_err {
+            if &stderr != e {
+                problems.push(format!(
+                    "stderr differs:\n{}",
+                    unified_diff(&format!("{name}.err"), e, &stderr)
+                ));
+            }
+        }
+        if !problems.is_empty() {
+            let mut report = format!("--- {name}: {}", problems.join("\n"));
+            if expected_err.is_none() {
+                report.push_str(&format!("\n--- stderr:\n{stderr}"));
+            }
+            failures.push(report);
+        }
     }
-    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "\n{} of {} scripts failed\n{}",
+        failures.len(),
+        scripts.len(),
+        failures.join("\n")
+    );
 }
 
 /// 50 concurrent pages in one browser (`parallel for` without a limit)

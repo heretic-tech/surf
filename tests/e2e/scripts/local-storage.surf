@@ -1,0 +1,13 @@
+# local_storage() / set_local_storage(map) / clear_local_storage() on the
+# storage fixture, which lists its localStorage on load.
+base = env("SURF_E2E_BASE")
+goto("{base}/storage.html")
+print(text("#ls"))
+set_local_storage({greeting: "hello", n: 2})
+reload()
+print(text("#ls"))
+m = local_storage()
+print(m.keys().sort().join(","), m["greeting"], m["n"])
+clear_local_storage()
+reload()
+print(text("#ls"), len(local_storage()))

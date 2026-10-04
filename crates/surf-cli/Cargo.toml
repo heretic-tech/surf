@@ -12,6 +12,12 @@ rust-version.workspace = true
 name = "surf"
 path = "src/main.rs"
 
+# The end-to-end suite lives at the workspace root (`tests/e2e/`) so the
+# scripts sit next to the runner; `cargo test --test e2e` runs it.
+[[test]]
+name = "e2e"
+path = "../../tests/e2e/main.rs"
+
 [dependencies]
 surf-syntax = { workspace = true }
 surf-vm = { workspace = true }
@@ -28,3 +34,5 @@ serde_json = { workspace = true }
 tempfile = { workspace = true }
 surf-testserver = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+regex = { workspace = true }
+similar = { workspace = true }

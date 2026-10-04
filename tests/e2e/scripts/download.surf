@@ -1,0 +1,14 @@
+# downloads: dir → Browser.setDownloadBehavior; wait_download() returns the
+# finished file's path (renamed to its suggested name).
+browser:
+    downloads: "{env("SURF_E2E_TMP")}/downloads"
+
+base = env("SURF_E2E_BASE")
+goto("{base}/download.html")
+click("#dl")
+p = wait_download()
+print(p)
+print(fs.read(p))
+click("#dl-attr")
+p2 = wait_download()
+print(p2, fs.read(p2).contains("\"items\""))

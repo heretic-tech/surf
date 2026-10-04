@@ -1,0 +1,42 @@
+# intercept(pattern): fulfil a JSON API with a synthetic response, fail an
+# image, rewrite a URL, add a request header — chosen by `mode`.
+base = env("SURF_E2E_BASE")
+mode = "fulfil"
+log = []
+
+intercept("*/api/items"):
+    log.push("{mode}:{event.method}:{event.url.replace(base, "")}")
+    if mode == "fulfil":
+        event.fulfil(status: 200, body: {items: [{id: 7, name: "synthetic"}]})
+    elif mode == "rewrite":
+        event.continue(url: "{base}/api/other")
+    # otherwise: not decided → continued untouched
+
+intercept("*/img/*"):
+    event.fail(reason: "BlockedByClient")
+
+intercept("*/api/echo*"):
+    h = event.headers
+    h["x-added"] = "by-surf"
+    event.continue(headers: h)
+
+goto("{base}/hooks.html")
+wait_text("#items", "synthetic")
+print(text("#items"))
+print(text("#echo"))
+
+mode = "rewrite"
+click("#again")
+wait_text("#items", "other")
+print(text("#items"))
+
+mode = "pass"
+click("#again")
+wait_text("#items", "one,two,three")
+print(text("#items"))
+
+goto("{base}/blocking.html")
+wait_text("#img", "image")
+print(text("#img"))
+print(log.join(" "))
+exit

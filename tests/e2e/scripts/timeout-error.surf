@@ -1,0 +1,6 @@
+# An uncaught timeout: the diagnostic names the selector, the wait and the
+# script line; stdout is empty and the exit code is 1.
+base = env("SURF_E2E_BASE")
+goto("{base}/forms.html")
+click("#missing", timeout: 300ms)
+print("unreachable")

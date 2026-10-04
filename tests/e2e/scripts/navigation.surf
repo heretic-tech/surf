@@ -1,0 +1,30 @@
+# back / forward / reload, a click that navigates, a 302 chain, and an
+# `on navigation` handler that logs every committed main-frame URL.
+base = env("SURF_E2E_BASE")
+seen = []
+
+on navigation("*"):
+    seen.push(event.url.replace(base, ""))
+
+goto("{base}/forms.html")
+click("#link")
+wait_navigation()
+print(title())
+print(back())
+print(title())
+print(forward())
+print(title())
+print(back(), back())
+reload()
+print(title(), url().ends_with("/forms.html"))
+
+goto("{base}/redirect-start.html")
+click("#go")
+wait_url("*/redirected")
+print(title(), text("#redirected"))
+
+goto("{base}/frames.html")
+print(text("#top"), count("iframe"))
+sleep(100ms)
+print(seen.join(" "))
+exit

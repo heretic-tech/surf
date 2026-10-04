@@ -1,0 +1,7 @@
+alerted
+no
+said:handler
+alert:hello,confirm:sure?,prompt:name?
+alert hello 
+confirm sure? 
+prompt name? dflt

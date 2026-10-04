@@ -1,0 +1,26 @@
+# Auto-waiting and explicit waits on the delayed fixture: a disabled button
+# becomes clickable, a spinner goes away, text arrives, an element moves
+# into place, and wait_url / wait_text / wait_gone / wait(sel) resolve.
+base = env("SURF_E2E_BASE")
+goto("{base}/delayed.html")
+print(exists("#appeared"))
+el = wait("#appeared")
+print(el.text())
+click("#later")
+print(text("#result"))
+wait_gone("#spinner")
+print(exists("#spinner"))
+wait_text("#counter", "5")
+print(text("#counter"))
+click("#mover")
+print(text("#result"))
+goto("{base}/nav.html")
+click("#hash")
+wait_url("*#section")
+print(url().ends_with("#section"))
+wait_url("re:nav\\.html#sec")
+wait(50ms)
+try:
+    wait_text("#nav-title", "never", timeout: 300ms)
+catch e:
+    print(e.message.contains("timed out"), e.message.contains("wait_text"))

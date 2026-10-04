@@ -1,0 +1,26 @@
+# on request / on response: Network is enabled only while the hooks exist.
+# Requests are collected and printed in a deterministic order from the
+# main body; response bodies are read with body() / json().
+base = env("SURF_E2E_BASE")
+requests = []
+responses = []
+echo = nil
+
+on request("*/api/*"):
+    requests.push("{event.method} {event.url.replace(base, "")} {event.resource_type}")
+
+on response("*/api/items"):
+    responses.push("{event.status} {event.header("content-type")} {len(event.json().items)}")
+
+on response("*/api/echo*"):
+    echo = event.json()
+
+goto("{base}/hooks.html")
+wait_text("#items", "one,two,three")
+wait_text("#echo", "POST")
+sleep(200ms)
+print(requests.sort().join("\n"))
+print(responses.join("\n"))
+print(echo.method, echo.body, echo.headers["x-surf-test"], echo.query)
+print(text("#echo"))
+exit

@@ -1,0 +1,27 @@
+# Dialog policies (accept / dismiss / accept with text), the dialogs() log,
+# and an `on dialog` handler that answers each dialog itself.
+base = env("SURF_E2E_BASE")
+answered = []
+
+on dialog:
+    answered.push("{event.kind}:{event.message}")
+    if event.kind == "confirm":
+        event.dismiss()
+    elif event.kind == "prompt":
+        event.accept("handler")
+    # alerts fall through: accepted when the body returns
+
+goto("{base}/dialog.html")
+click("#alert")
+wait_text("#result", "alerted")
+print(text("#result"))
+click("#confirm")
+wait_text("#result", "no")
+print(text("#result"))
+click("#prompt")
+wait_text("#result", "said:")
+print(text("#result"))
+print(answered.join(","))
+for d in dialogs():
+    print(d.kind, d.message, d.default_prompt)
+exit

@@ -1,0 +1,18 @@
+# Without a handler the page policy answers dialogs: accept (default),
+# dismiss, or accept with a text.
+base = env("SURF_E2E_BASE")
+goto("{base}/dialog.html")
+click("#confirm")
+print(text("#result"))
+on_dialog("dismiss")
+click("#confirm")
+print(text("#result"))
+click("#prompt")
+print(text("#result"))
+on_dialog("typed")
+click("#prompt")
+print(text("#result"))
+on_dialog("accept")
+click("#prompt")
+print(text("#result"))
+print(len(dialogs()), dialogs()[0].kind, dialogs()[2].default_prompt)

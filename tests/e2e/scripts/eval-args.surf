@@ -1,0 +1,9 @@
+# eval with arguments: a lambda with parameters becomes an arrow function
+# called with the extra arguments; a string must then be a function.
+base = env("SURF_E2E_BASE")
+goto("{base}/text.html")
+print(eval(fn(a, b): a + b, 1, 2))
+print(eval(fn(sel): document.querySelector(sel).textContent, "#desc"))
+print(eval("(x) => x.toUpperCase()", "hi"))
+print(eval("(xs) => xs.map(x => x * 2)", [1, 2, 3]))
+print(eval(fn(m): m.a + m.b, {a: 10, b: 5}))

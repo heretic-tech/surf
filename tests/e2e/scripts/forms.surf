@@ -1,0 +1,53 @@
+# Form actions: type / fill / press combos / check / select / all() iteration
+# / text / attr / value / count / exists / hover / dblclick / click count.
+base = env("SURF_E2E_BASE")
+goto("{base}/forms.html")
+
+type("#username", "ab")
+press("#username", "Control+a")
+press("#username", "Shift+Tab")
+print(text("#keys"))
+fill("#username", "surfer")
+print(value("#username"))
+press("#username", "Enter")
+print(text("#submitted"))
+
+fill("#notes", "new notes")
+print(value("#notes"))
+
+check("#agree")
+print(eval("document.getElementById('agree').checked"))
+uncheck("#agree")
+print(eval("document.getElementById('agree').checked"))
+check("#r2")
+print(eval("document.querySelector('input[name=r]:checked').value"))
+
+print(select("#color", "green"))
+print(value("#color"))
+print(select("#color", "Blue"))
+print(select("#multi", ["a", "c"]))
+
+click("#counter")
+click("#counter")
+print(text("#clicks"))
+click("#dbl", count: 2)
+print(text("#clicks"))
+dblclick("#dbl")
+hover("#hoverme")
+print(text("#hovered"))
+
+print(attr("#link", "data-kind"), attr("#link", "title"), attr("#link", "nope"))
+print(text("#para"))
+print(html("#para").contains("<b>world</b>"))
+print(count("input"), count("select"), exists("#hidden"), exists("#missing"))
+
+goto("{base}/text.html")
+items = []
+for li in all("#list li"):
+    items.push(li.text())
+print(items.join("|"))
+print(first("#list li").text(), len(all("#list li")))
+print(all("#list li")[2].text())
+click("text=Add to cart")
+print(text("#out"))
+print(text("//ul[@id='list']/li[2]"))

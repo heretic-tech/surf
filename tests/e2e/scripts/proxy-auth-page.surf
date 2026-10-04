@@ -1,0 +1,20 @@
+# browser.new_page(proxy: …) with an authenticating proxy: that page goes
+# through the proxy, the default page does not. An `on response` hook sees
+# the X-Proxy header the stub adds.
+browser:
+    flags: ["--host-resolver-rules=MAP surf.test 127.0.0.1"]
+
+base = env("SURF_E2E_PROXIED_BASE")
+via = []
+
+on response("*/proxy-echo"):
+    via.push("{event.page.index}:{event.header("x-proxy")}")
+
+p = browser.new_page(proxy: env("SURF_E2E_PROXY_AUTH"), name: "proxied")
+p.goto("{base}/proxy-echo")
+print(p.text("body"))
+page(1).goto("{base}/proxy-echo")
+print(page(1).text("body"))
+sleep(100ms)
+print(via.sort().join(" "))
+exit

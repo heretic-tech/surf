@@ -1,0 +1,28 @@
+# Cookies: set for the current URL, read back, filter by domain, keyword
+# attributes, clear, and a JSON export / import round trip.
+base = env("SURF_E2E_BASE")
+dir = env("SURF_E2E_TMP")
+goto("{base}/")
+set_cookie("a", "1")
+set_cookie("b", "2", path: "/", http_only: true)
+set_cookie({name: "c", value: "3", domain: "127.0.0.1", path: "/"})
+goto("{base}/cookie-echo")
+print(text("body").split("; ").sort().join("; "))
+names = []
+for c in cookies("127.0.0.1"):
+    tag = ""
+    if c.http_only:
+        tag = "(http)"
+    names.push("{c.name}={c.value}{tag}")
+print(names.sort().join(" "))
+print(len(cookies("example.com")))
+n = export_cookies("{dir}/cookies.json")
+print(n, fs.exists("{dir}/cookies.json"))
+clear_cookies()
+print(len(cookies()))
+goto("{base}/cookie-echo")
+print("[" + text("body") + "]")
+print(import_cookies("{dir}/cookies.json"))
+goto("{base}/cookie-echo")
+print(text("body").split("; ").sort().join("; "))
+print(browser.cookies().len())

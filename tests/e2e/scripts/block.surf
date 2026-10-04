@@ -1,0 +1,17 @@
+# block([...]) → Network.setBlockedURLs: the image and the ad script fail to
+# load; block([]) lifts it and releases Network.
+base = env("SURF_E2E_BASE")
+block(["*.png", "*/ads/*"])
+goto("{base}/blocking.html")
+wait_text("#img", "image")
+print(text("#img"))
+print(text("#ad"))
+block([])
+reload()
+wait_text("#img", "image")
+print(text("#img"))
+print(text("#ad"))
+try:
+    block(["re:x"])
+catch e:
+    print(e.message)
