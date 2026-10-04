@@ -378,6 +378,7 @@ browser:
     flags: ["--lang=en-US"]
     timeout: 30s                   # default auto-wait timeout for actions
     engine: chrome                 # `apostate` reserved (clear "not yet" error)
+    downloads: "./downloads"       # allow downloads into this dir; wait_download()
 ```
 
 Rules:
@@ -421,7 +422,13 @@ Rules:
   private page, or the main body's sole page) to a new, empty browser
   context behind the next proxy of the list (round-robin, per browser),
   keeps its cookies, leaves it on `about:blank` and returns the proxy URL.
-  Without a `proxies:` list it is an error.
+  Without a `proxies:` list it is an error. `browser.new_page(proxy: …)`
+  gives one page its own proxy (own browser context, own cookies); an
+  authenticating proxy (`http://user:pass@host:port`) works at both levels.
+- `downloads: dir` allows downloads (Chrome refuses them otherwise) and
+  saves each one under its suggested file name in `dir` (created if
+  missing; relative to the working directory). `wait_download()` on the
+  page that started the download returns the finished file's path.
 
 ---
 
@@ -495,14 +502,19 @@ attached, visible, stable (not animating) and enabled, up to `timeout`
 | `count(sel)` | int | no wait |
 | `all(sel)` / `first(sel)` | list of elements / element or nil | element methods: `text() html() attr(n) value() visible() click() type(t) fill(t) press(k) check() select(v) scroll() eval(js) all(sel) first(sel)`; `.selector` property |
 | `wait(sel)` | the element | attached and visible; `wait(2s)` sleeps |
-| `wait_gone(sel)` `wait_text(sel, t)` `wait_url(pattern)` `wait_navigation()` | nil | `wait_url` takes a glob (`*`) or `re:…` |
-| `eval(js)` / `eval(fn(): expr)` | JSON value | runs in the isolated world; `undefined` → nil |
+| `wait_gone(sel)` `wait_text(sel, t)` `wait_url(pattern)` | nil | `wait_url` takes a glob (`*`) or `re:…` |
+| `wait_navigation(wait_until: "load")` | nil | the next main-frame navigation; see below |
+| `eval(js)` / `eval(fn(): expr)` / `eval(js_fn, args…)` | JSON value | runs in the isolated world; `undefined` → nil |
 | `screenshot(path, full: false)` `pdf(path)` | nil | |
 | `url()` `title()` | string | |
-| `back()` `forward()` | bool (moved?) | `reload()` → nil; all take `wait_until:` |
-| `cookies()` | list of maps | `{name, value, domain, path, expires, http_only, secure, same_site}` |
-| `set_cookie(map)` / `set_cookie(name, value)` / `set_cookies([maps])` / `clear_cookies()` | nil | a cookie without `domain` / `url` is set for the current URL |
-| `viewport(w, h)` `on_dialog("accept" \| "dismiss" \| text)` `dialogs()` | nil / list | |
+| `back()` `forward()` | bool (moved?) | `reload()` → nil; all take `wait_until:`. `back()` is `false` only when the history has no earlier entry — the initial `about:blank` counts |
+| `cookies()` / `cookies(domain)` | list of maps | `{name, value, domain, path, expires, http_only, secure, same_site}`; `domain` filters (a cookie for `.example.com` matches `example.com` and its subdomains) |
+| `set_cookie(map)` / `set_cookie(name, value, …)` / `set_cookies([maps])` / `clear_cookies()` | nil | a cookie without `domain` / `url` is set for the current URL; keywords `domain path url secure http_only expires same_site` |
+| `export_cookies(path)` / `import_cookies(path)` | int (count) | JSON list of cookie maps, the same shape `cookies()` returns |
+| `local_storage()` / `set_local_storage(map)` / `clear_local_storage()` | map / nil / nil | the current origin's `localStorage`; values are stored as strings (non-strings as JSON) |
+| `block([patterns])` / `block([])` | nil | `Network.setBlockedURLs`: matching requests fail (`*` globs only — `re:` is an error); `block([])` lifts it. The list survives a page move |
+| `wait_download(timeout:)` | path (string) | the next download started from this page (needs `downloads:` in the config) |
+| `viewport(w, h)` `on_dialog("accept" \| "dismiss" \| text)` `dialogs()` | nil / list | `dialogs()` is `[{kind, message, default_prompt, url}]`, oldest first |
 | `page.close()` | nil | pages only, never bare |
 
 Every selector action takes `timeout:`; `type` also takes `delay:`.
@@ -515,6 +527,21 @@ sent as-is; a block lambda becomes an immediately invoked function, so
 `return` works). Use `eval("…")` for anything but the simplest
 expressions, and remember that `{` `}` interpolate inside a Surf string:
 write a JavaScript object literal as `eval("(\{a: 1\})")`.
+
+With extra arguments the first argument must be a JavaScript **function**
+(a lambda with parameters becomes an arrow function; a string must contain
+one): `eval(fn(sel): document.querySelector(sel).textContent, "#desc")`,
+`eval("(xs) => xs.map(x => x * 2)", [1, 2, 3])`. Arguments are passed as
+JSON (lists, maps, strings, numbers, booleans, nil).
+
+`wait_navigation()` waits for the next main-frame navigation to commit
+and reach `wait_until:` (`"load"` default, `"domcontentloaded"`,
+`"networkidle"`, `"commit"`). Call it *after* the action that navigates
+(`click("#submit")` then `wait_navigation()`): actions that can navigate
+start listening before they run, so a navigation that finished between
+the click and the wait is still seen. With no action before it, only a
+navigation that happens after the call counts; a 302 chain is one
+navigation (the final URL commits).
 
 ---
 
@@ -534,7 +561,10 @@ on request("*/api/*"):
     print(event.method, event.url)
 
 on response("*.json"):
-    print(event.status)
+    print(event.status, len(event.json()))
+
+intercept("*/api/items"):
+    event.fulfil(status: 200, body: {items: []})
 ```
 
 - `on <event>(<args>):` at the top level (or `on message:` inside an actor).
@@ -542,7 +572,8 @@ on response("*.json"):
   positional. Handlers are allowed only at the top level and directly in
   an actor body (not inside `if`/`for`/`fn` blocks). The event name must be
   one of `element_appears`, `navigation`, `dialog`, `request`, `response`,
-  `message`; `message` only inside an actor.
+  `intercept`, `message`; `message` only inside an actor. `intercept` is
+  also spelled without `on`: `intercept(pattern):` at the top level.
 - The handler body runs on **its own task** each time the event fires; the
   payload is bound to `event`. Handlers on the default browser observe the
   sole page (or every page if several exist).
@@ -559,8 +590,36 @@ on response("*.json"):
   whose URL matches the pattern (`*` glob, or `re:…`; no pattern matches
   everything). `event` is a map `{url, page}`; bare actions in the body act
   on that page.
-- `dialog`, `request` and `response` handlers are accepted but do not fire
-  yet (a warning is printed; task 9).
+- `dialog` fires on every `alert` / `confirm` / `prompt` / `beforeunload`
+  the page opens; while a handler is declared the page's `on_dialog`
+  policy is not applied. `event` has `kind`, `message`, `default_prompt`,
+  `url`, `page` and the methods `accept()` / `accept(text)` (prompts) and
+  `dismiss()`. A dialog the body did not answer is accepted when the body
+  returns; answering twice is an error. Dialogs still appear in
+  `dialogs()`.
+- `request(pattern)` fires for every request the page sends whose URL
+  matches (`Network.requestWillBeSent`; `Network` is enabled on that page
+  only while such handlers exist). `event` is a map `{url, method,
+  headers, resource_type, post_data, request_id, page}` (header names are
+  lower-case).
+- `response(pattern)` fires when response headers arrive. `event` has
+  `url status status_text ok headers mime_type resource_type from_cache
+  request_id page`, `header(name)`, and `body()` / `text()` / `json()`
+  (which wait for the body to finish loading, up to `timeout:`).
+- `intercept(pattern)` pauses every matching request (`Fetch`, enabled
+  only while such handlers exist) and hands it to the body as `event`
+  (`url method headers resource_type post_data request_id decided page`,
+  `header(name)`). The body decides with **one** of `event.continue(url:,
+  method:, headers:, post_data:)` (overrides optional), `event.fulfil(
+  status: 200, headers:, body:, content_type:)` (a list or map body is
+  sent as JSON with `content-type: application/json`; `fulfill` is
+  accepted too) or `event.fail(reason: "BlockedByClient")` (a
+  `Network.ErrorReason`; default `Failed`). When several `intercept`
+  blocks match, they run in declaration order until one decides; a
+  request nobody decides on is continued untouched. Hooks and
+  interception compose with a page proxy's authentication (one `Fetch`
+  session per page is shared). `block([...])` is the cheap alternative
+  when a request only needs to fail.
 - `on message:` inside an actor body receives each mailbox message as
   `event` (alternative to calling `receive()` in a loop). An actor with an
   `on message:` handler stays alive after its body returns (its mailbox
@@ -787,6 +846,7 @@ supervisor_decl := "supervisor" IDENT ":" NEWLINE INDENT prop* sup_stmt+ DEDENT
 sup_stmt    := "spawn" postfix NEWLINE
              | "parallel" "for" IDENT "in" expr ":" NEWLINE INDENT prop* sup_stmt+ DEDENT
 handler     := "on" IDENT ("(" (expr ("," expr)* ","?)? ")")? ":" block
+             | "intercept" "(" expr ")" ":" block          # top level only
 params      := (param ("," param)* ","?)?       param := IDENT (":" expr)?
 
 block       := NEWLINE INDENT stmt+ DEDENT

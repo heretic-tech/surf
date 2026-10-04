@@ -52,15 +52,6 @@ something; link the PR / commit that picks it up.
       frame; `Page.frameAttached` tracking. Today every action resolves in
       the main frame's world (`World::create(session, frame_id)` already
       takes any frame id, so child-frame worlds are a registry away).
-- [ ] surf-browser proxy auth (`network::ProxyAuth`) is implemented from
-      the CDP docs but has no test: an authenticating proxy stub (HTTP 407
-      + `Proxy-Authenticate: Basic`) in `tests/common` would exercise
-      `Fetch.authRequired` → `continueWithAuth` and the "drop the Fetch
-      guard after the first proxy challenge" rule. Task 9 should also make
-      network hooks and `ProxyAuth` share one `Fetch.enable` (today each
-      sends its own; the last `enable` wins, so a hook enabling `Fetch`
-      without `handleAuthRequests` after a proxy page would switch auth
-      handling off).
 - [ ] surf-browser `fill()` sets text through select-all +
       `Input.insertText`; `<input type=date|number|range|color|file>` need
       value assignment / `DOM.setFileInputFiles` instead (Playwright-style).
@@ -117,13 +108,34 @@ something; link the PR / commit that picks it up.
 - [ ] surf-vm: `Op` is an enum of up to 16 bytes; if a profile ever shows
       dispatch cost, pack to u32 words. Not worth it for IO-bound scripts.
 
-## Runtime (step 7 / 8 deferrals)
-- [ ] `on dialog` / `on request` / `on response` handlers are declared and
-      stored but never fire (a warning is printed) — task 9. `on dialog`
-      needs a `DialogPolicy::Defer` in surf-browser so the page's event
-      task stops auto-answering while a handler decides (`event.accept()`
-      / `event.dismiss()` → `Page.handleJavaScriptDialog`), with "accept
-      when the body returns without answering" as the fallback.
+## Runtime (step 7 / 8 / 9 deferrals)
+- [ ] Handlers declared after a page already has its observer (REPL, or
+      an `on …:` reached from a body) are installed on a spawned task, so
+      the very next action may race them; top-level handlers are hoisted
+      and awaited (`Runtime::instrument`) and never race. A page whose
+      observer already runs does not pick up later-declared handlers at
+      all (`observed` is per page) — restart the observer with the new
+      handler set if the REPL needs it.
+- [ ] `Page::mark_action` keeps two broadcast receivers armed between an
+      action and the next `wait_navigation()` / action; a script that
+      never calls `wait_navigation()` after a `click` holds them until the
+      next action, and more than `EVENT_CHANNEL_CAPACITY` (1024) lifecycle
+      events in between would log a lag warning. Harmless; drop the armed
+      state on a timer if it ever shows up in logs.
+- [ ] `wait_download()` matches downloads by the page's main `frameId`; a
+      download started from an iframe is not attributed to the page. Track
+      child frame ids when the frames API lands.
+- [ ] `intercept` cannot see or rewrite response bodies (`Fetch.requestPaused`
+      at the response stage, `Fetch.getResponseBody`, `fulfil` after the
+      real response); only request-stage decisions exist today.
+- [ ] `on response` `body()` fails for responses Chrome evicts from its
+      buffer before `loadingFinished` is observed (large streams, or when
+      the handler runs late); the error names the request. A
+      `Network.setDataSizeLimits`-style knob is not exposed.
+- [ ] `block([...])` patterns use Chrome's own `*` matcher (unanchored
+      substring glob) while hooks / `wait_url` use Surf's anchored glob;
+      documented, but a `re:` pattern for `block` would need a Fetch-based
+      implementation.
 - [ ] `h.cancel()` on a task that is itself waiting in a `parallel for`
       cancels the items (drop guard), but a task's *spawned* children are
       not cancelled with it (no parent/child tree beyond supervisors).

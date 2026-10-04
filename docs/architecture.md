@@ -18,7 +18,7 @@ crates/
 protocol/        vendored browser_protocol.json + js_protocol.json (+ VERSION) for codegen
 docs/            this file, language.md
 examples/        hello, login, two-tabs, scrape-emit, parallel-pool, supervised
-tests/e2e/       `scripts/<name>.surf` + `<name>.out` (+ optional `.code`), run through the built `surf` binary by crates/surf-cli/tests/e2e.rs
+tests/e2e/       main.rs (the runner; declared as surf-cli's `e2e` test target) + `scripts/<name>.surf` + `<name>.out` (+ optional `.err`, `.code`), run through the built `surf` binary
 ```
 
 Dependency direction (strict, no cycles):
@@ -78,7 +78,7 @@ surf-syntax ──► surf-vm ──► surf-runtime ──► surf-browser ─�
 |------|-------------|
 | never `Runtime.enable`, never `DOM.enable` | `surf_cdp::FORBIDDEN_METHODS` (refused by `Session::call_raw` in every build; no typed command is generated for them), `Session::enable_domain` rejects `Runtime`/`DOM`; `surf-browser` only creates isolated worlds |
 | exact launch flags, no `--enable-automation`; the only `--disable-*` is `--disable-blink-features=AutomationControlled`, on launched browsers only (Decision 12) | `surf_browser::launch::LaunchConfig::args` (unit-tested; `tests/launch.rs` checks `navigator.webdriver === false`, no infobar, and that the switch is why) |
-| only `Page.enable` by default; `Network`/`Fetch` only while a hook or proxy auth needs them | `surf_cdp::DomainGuard` ref-counting, owned by `surf_browser::network` hooks / `ProxyAuth`; `tests/pages.rs::quiet_contract_only_page_enable_is_sent` traces a full session and asserts it |
+| only `Page.enable` by default; `Network`/`Fetch` only while a hook or proxy auth needs them | `surf_cdp::DomainGuard` ref-counting, owned by `surf_browser::network` (`NetworkHooks`, the page's block guard, the per-session `FetchHub`); `tests/pages.rs::quiet_contract_only_page_enable_is_sent` traces a full session and asserts it |
 | pipe by default, no listening port unless `cdp: 9222` | `surf_browser::launch::CdpMode` → `TransportChoice` (`tests/launch.rs` runs `lsof -iTCP -sTCP:LISTEN -p <pid>`) |
 | no main-world injection; helpers in the isolated world under random names | `surf_browser::world` (resolver as `__surf_<random>` on the world global; `tests/pages.rs` checks the main world cannot see it), `surf_browser::observer` |
 
@@ -382,7 +382,7 @@ runs once per failure, never at declaration).
 pub fn discovery::find_chrome(explicit: Option<&Path>) -> Result<Found { path, version: Option<String>, origin }, BrowserError>;
 pub fn discovery::chrome_or_skip(test_name: &str) -> Option<PathBuf>;   // tests: prints a skip message
 
-pub struct LaunchOptions { path, cdp: CdpMode, headless: Option<bool>, virtual_display, size, profile, proxy, proxies, flags, timeout, engine }  // the `browser:` block
+pub struct LaunchOptions { path, cdp: CdpMode, headless: Option<bool>, virtual_display, size, profile, proxy, proxies, flags, timeout, engine, downloads: Option<PathBuf> }  // the `browser:` block
 impl LaunchOptions { pub fn resolve(&self) -> Result<LaunchConfig, BrowserError>; }        // discovery + headed/headless decision + proxy parse
 
 pub struct LaunchConfig { path, headless: bool, size, proxy: Option<ProxySpec>, profile, flags, env, virtual_display, transport: TransportChoice { Pipe | Port(u16) }, correct_automation_controlled }
@@ -464,6 +464,12 @@ impl Page {
     pub async fn pdf(&self, path: &Path);  pub async fn pdf_bytes(&self) -> Result<Vec<u8>, _>;
     pub async fn set_viewport(&self, w: u32, h: u32);
     pub async fn cookies(&self) -> Result<Vec<Cookie>, _>;  pub async fn set_cookies(&self, &[Cookie]);  pub async fn clear_cookies(&self);
+    pub async fn local_storage(&self) -> Result<Map, _>;  pub async fn set_local_storage(&self, Map);  pub async fn clear_local_storage(&self);
+    pub async fn network_hooks(&self) -> Result<NetworkHooks, _>;            // Network held while the handle lives
+    pub async fn intercept(&self, patterns: Vec<UrlPattern>) -> Result<Interception, _>;   // Fetch via the page's FetchHub
+    pub async fn set_blocked_urls(&self, patterns: Vec<String>);  pub fn blocked_urls(&self) -> Vec<String>;
+    pub async fn answer_dialog(&self, accept: bool, prompt_text: Option<String>);        // DialogPolicy::Defer
+    pub(crate) fn mark_action(&self);                                        // arms wait_for_navigation (see Navigation)
     pub async fn rebind(&self, new_backing: Backing, migration: Migration) -> Result<(), BrowserError>;
     pub async fn close(&self) -> Result<(), BrowserError>;
     // actions.rs — every one takes `ActionOptions { timeout, delay }`
@@ -513,7 +519,15 @@ name (`load` by default, `DOMContentLoaded`, `networkIdle`); a missing
 `wait_for_navigation` / `reload` / `back` / `forward` wait for the next
 main-frame `Page.frameNavigated` (a `BackForwardCacheRestore` finishes
 immediately) and then the lifecycle event for that frame's `loaderId`.
-`url()` reads `location.href` in the isolated world.
+Because broadcast receivers buffer from the moment they are created,
+every action that can navigate (`click`, `press`, …) first calls
+`Page::mark_action`, which subscribes to `Page.frameNavigated` /
+`Page.lifecycleEvent` and records the navigation epoch; a
+`wait_for_navigation` that follows takes those armed receivers, so a
+navigation that committed between the action and the wait is still seen
+(`commit` returns at once when the epoch already advanced). The armed
+state is consumed by the wait, replaced by the next action and dropped on
+rebind / close. `url()` reads `location.href` in the isolated world.
 
 **Worlds.** `page.world()` lazily runs `Page.createIsolatedWorld{frameId,
 worldName: <random 12 chars>, grantUniveralAccess: true}` and installs
@@ -553,20 +567,52 @@ parses `Shift+Tab` / `Ctrl+a` / `Mod+Enter` into `key`, `code`,
 `textContent` of the deepest element, exact (case-insensitive) before
 substring, skipping `script`/`style`.
 
-**Proxy auth.** Credentials never reach the command line. A page whose
-context has an authenticating proxy (launch-level `proxy:` or
-`NewPageOptions.proxy`) gets `Fetch.enable{handleAuthRequests: true,
-patterns: [{urlPattern: "*"}]}` on its session and a task that answers
-`Fetch.requestPaused` with `continueRequest` and `Fetch.authRequired`
-(`source == "Proxy"`) with `continueWithAuth{ProvideCredentials}`; after
-the first proxy challenge is answered the `Fetch` guard is dropped
-(Chrome caches the credentials for the context) unless a network hook
-still holds the domain.
+**Network (`network.rs`, task 9).** Nothing is on by default; `Network`
+and `Fetch` are ref-counted `DomainGuard`s owned by whoever needs them:
+
+| need | domain | owner |
+|------|--------|-------|
+| `on request` / `on response` | `Network` | `NetworkHooks` (subscribes to `requestWillBeSent`, `responseReceived`, `loadingFinished`, `loadingFailed` *before* `Network.enable`; split into a `NetworkHold` + `HookStreams` so the runtime's observer can keep the domain while handing out `ResponseObject`s whose `body()` waits for `loadingFinished` then `Network.getResponseBody`) |
+| `block([...])` | `Network` | the page, while the list is non-empty (`Network.setBlockedURLs` with Chrome's unanchored `*` patterns; re-applied on rebind) |
+| `intercept(pattern):` | `Fetch` | `Interception` (an `mpsc` of `InterceptedRequest`s with `continue_request(overrides)` / `fulfil(status, headers, body)` / `fail(reason)` and a decided flag) |
+| proxy credentials | `Fetch` (`handleAuthRequests`) | the page, until the first challenge is answered |
+
+`Fetch` has exactly one owner per page session, the `FetchHub`: proxy
+authentication and interception both register their need with it and it
+re-sends `Fetch.enable{handleAuthRequests, patterns}` whenever either
+changes (so a hook can no longer switch auth handling off by sending its
+own `enable`, the TASKS item from step 4). The hub answers
+`Fetch.authRequired{source: "Proxy"}` with the context's credentials
+(`Default` otherwise, so a site's own 401 reaches the page), forwards a
+`Fetch.requestPaused` whose URL matches an interceptor pattern to the
+interceptor and continues everything else untouched. Chrome caches proxy
+credentials per context, so after the first answered challenge the auth
+need is dropped and `Fetch` goes away unless an interceptor holds it.
+Credentials never reach the command line (`--proxy-server` carries only
+`scheme://host:port`); `Browser::new_page(NewPageOptions { proxy })`
+creates a context with its own `proxyServer` and installs the same hub.
+
+**Downloads.** `downloads: dir` sends `Browser.setDownloadBehavior{
+behavior: "allowAndName", downloadPath, eventsEnabled: true}` for the
+default context (and every private one as it is created) and runs one
+`DownloadTracker` on the root session that follows
+`Browser.downloadWillBegin` / `downloadProgress`, renames the finished
+`<guid>` file to its `suggestedFilename` (de-duplicated) and serves
+`Browser::wait_download(page, timeout)` — the next completed download
+whose `frameId` belongs to that page.
+
+**Storage.** `local_storage()` / `set_local_storage` / `clear_local_storage`
+are isolated-world evals on the current origin (no `DOMStorage` domain).
+
+**Dialogs.** `DialogPolicy::Defer` leaves a dialog open for the runtime's
+`on dialog` handler, which answers through `Page::answer_dialog`
+(`Page.handleJavaScriptDialog`); the event task still records it in
+`dialogs()`.
 
 **Rebind (Decision 10).** `Page::rebind(new_backing, migration)` exports
 cookies (`Storage.getCookies{browserContextId}` on the root session) and
 `localStorage`/`sessionStorage` (isolated-world eval), tears down the old
-backing (event task, `Page` guard, proxy auth), installs the new one,
+backing (event task, `Page` guard, `FetchHub`, block guard), installs the new one,
 imports cookies (`Storage.setCookies`), re-navigates to the URL and
 restores storage (origin-bound, so only together with the URL), then
 detaches and closes the old target. The handle, index and name are
@@ -733,7 +779,7 @@ waits for the siblings first.
 **Measured (debug build, this Mac):** 50 concurrent pages (`parallel for`
 without a limit, each page loading a 100 ms fixture) complete in 3.1 s end
 to end including launch and shutdown
-(`surf-cli/tests/e2e.rs::fifty_concurrent_pages_under_thirty_seconds`);
+(`tests/e2e/main.rs::fifty_concurrent_pages_under_thirty_seconds`);
 the e2e scripts `parallel-pool`, `supervised`, `scout-workers`,
 `shift-proxy`, `handler-rebind`, `spawn-join`, `concurrency-basics`,
 `supervisor-giveup`, `one-for-all` each run in ≈ 1 s.
@@ -794,19 +840,37 @@ scripts are IO-bound.
 ## Testing
 
 - Unit tests per crate (`cargo test --workspace`).
-- `crates/surf-cli/tests/e2e.rs` runs against a real Chrome: `SURF_CHROME`
-  overrides discovery; when no Chrome is found the test prints a skip
-  message and passes. It must actually run on developer Macs and in the CI
-  `e2e` job. `scripts_match_expected_output` runs every
+- `tests/e2e/main.rs` (`cargo test -p surf-cli --test e2e`) runs against a
+  real Chrome: `SURF_CHROME` overrides discovery; when no Chrome is found
+  the test prints a skip message and passes. It must actually run on
+  developer Macs and in the CI `e2e` job (`xvfb-run` on Linux, native on
+  macOS). `scripts_match_expected_output` runs every
   `tests/e2e/scripts/<name>.surf` through the built `surf` binary
-  (`--headless --timeout 15s`, `SURF_E2E_BASE` = fixture URL,
-  `SURF_E2E_TMP` = scratch dir) and compares stdout with `<name>.out` and
-  the exit code with `<name>.code` (default 0). Scripts today: hello,
-  login, two-tabs, implicit-page, ambiguity (the error message), handler
-  (`on element_appears` + `exit`), eval (JSON results, lambda body),
-  screenshot. Other tests cover `--json`, a rendered runtime error, the
-  shebang shorthand + `exit(n)`, `surf check`, `surf doctor`, and the REPL.
+  (`--headless --timeout 15s`; env: `SURF_E2E_BASE` fixture URL,
+  `SURF_E2E_PROXIED_BASE` the same server as `http://surf.test:<port>`
+  (non-loopback, so Chrome proxies it), `SURF_E2E_PROXY_A/B` two tagging
+  forward-proxy stubs, `SURF_E2E_PROXY_AUTH` an authenticating one
+  (`user:pass@`), `SURF_E2E_TMP` a per-script scratch dir) and compares
+  normalised stdout with `<name>.out`, stderr with `<name>.err` when
+  present, and the exit code with `<name>.code` (default 0); a mismatch
+  prints a unified diff. `SURF_E2E_FILTER=<substring>` runs a subset,
+  `SURF_E2E_UPDATE=1` rewrites the expectations (review the diff),
+  `SURF_E2E_HEADED=1` runs headed. 33 scripts today: hello, login,
+  two-tabs, implicit-page, ambiguity, ambiguity-error, timeout-error,
+  handler, handler-rebind, eval, eval-args, screenshot, forms, waits,
+  navigation, dialogs, dialog-policy, hooks, intercept, block, cookies,
+  local-storage, download, proxy-auth-browser, proxy-auth-page,
+  shift-proxy, spawn-join, concurrency-basics, parallel-pool, supervised,
+  scout-workers, supervisor-giveup, one-for-all. Other tests cover
+  `--json`, a rendered runtime error, the shebang shorthand + `exit(n)`,
+  `surf check`, `surf doctor`, the REPL and the 50-page timing gate.
 - Fixture pages are served by the `surf-testserver` crate (in-process
-  `axum`; `fixtures/*.html`; also a `surf-testserver [port]` binary for
-  running scripts by hand).
+  `axum`; `fixtures/*.html`; routes for cookies, redirects, a JSON API,
+  a download, a `/proxy-echo` that names the proxy; also a
+  `surf-testserver [port]` binary for running scripts by hand). Its
+  `Proxy` is a forward-proxy stub (plain HTTP + `CONNECT`) that tags what
+  it forwards (`X-Surf-Proxy` request header, `X-Proxy` response header)
+  and, with `start_with_auth`, demands `Proxy-Authorization: Basic` (407
+  otherwise) — the authenticating proxy exercises `Fetch.authRequired` at
+  browser level and through `browser.new_page(proxy:)`.
 - Codegen input: `protocol/*.json`, pinned in `protocol/VERSION`.
