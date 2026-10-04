@@ -34,13 +34,13 @@ pub mod stdlib;
 pub mod value;
 pub mod vm;
 
-pub use bytecode::{Chunk, CompiledProgram, Function, Op};
+pub use bytecode::{Chunk, CompiledProgram, DeclKind, Function, Op, UpvalueDesc};
 pub use cancel::CancelToken;
-pub use compiler::{compile, CompileError};
-pub use error::RuntimeError;
+pub use compiler::{compile, compile_with_source, CompileError};
+pub use error::{Cancelled, ExitRequest, RuntimeError};
 pub use host::{Declaration, FsOp, Host, Prop};
-pub use stdlib::Globals;
-pub use value::{Args, Closure, NativeObject, Value};
+pub use stdlib::{BuiltinFn, Globals, NativeFn};
+pub use value::{format_duration, Args, Closure, NativeObject, Range, Upvalue, Value};
 pub use vm::Vm;
 
 /// Convenience re-export so hosts don't need a direct `futures` dependency

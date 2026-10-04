@@ -141,6 +141,23 @@ pub trait Host {
         args: Args,
     ) -> LocalBoxFuture<'a, Result<Value, RuntimeError>>;
 
+    /// `spawn recv.name(args)` — spawn a method call (`spawn work.fetch(1)`).
+    /// Hosts that do not support it keep the default, which errors.
+    fn spawn_method<'a>(
+        &'a self,
+        vm: &'a mut Vm,
+        receiver: Value,
+        name: &str,
+        args: Args,
+    ) -> LocalBoxFuture<'a, Result<Value, RuntimeError>> {
+        let _ = (vm, args);
+        let msg = format!(
+            "spawn of a method call (`{}.{name}(…)`) is not supported by this host",
+            receiver.type_name()
+        );
+        Box::pin(async move { Err(RuntimeError::new(msg)) })
+    }
+
     /// `parallel for x in items:` — run `body(item)` concurrently, honouring
     /// `limit` / `fail_fast` in `opts`. Resolves when all items finished.
     fn parallel_for<'a>(

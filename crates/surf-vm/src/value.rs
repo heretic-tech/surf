@@ -4,7 +4,9 @@ use crate::error::RuntimeError;
 use crate::vm::Vm;
 use futures::future::LocalBoxFuture;
 use indexmap::IndexMap;
+use std::any::Any;
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::fmt;
 use std::rc::Rc;
 use std::time::Duration;
@@ -50,6 +52,11 @@ impl Value {
         Value::Map(Rc::new(RefCell::new(entries)))
     }
 
+    /// Wrap a native object.
+    pub fn native(n: impl NativeObject + 'static) -> Value {
+        Value::Native(Rc::new(n))
+    }
+
     /// Name of the dynamic type, for error messages.
     pub fn type_name(&self) -> &str {
         match self {
@@ -77,6 +84,45 @@ impl Value {
             Value::List(l) => !l.borrow().is_empty(),
             Value::Map(m) => !m.borrow().is_empty(),
             Value::Duration(_) | Value::Fn(_) | Value::Native(_) => true,
+        }
+    }
+
+    /// `true` for `nil`.
+    pub fn is_nil(&self) -> bool {
+        matches!(self, Value::Nil)
+    }
+
+    /// The string if this is a `Str`.
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Value::Str(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// The integer if this is an `Int`.
+    pub fn as_int(&self) -> Option<i64> {
+        match self {
+            Value::Int(i) => Some(*i),
+            _ => None,
+        }
+    }
+
+    /// The number as `f64` if this is an `Int` or `Float`.
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            Value::Int(i) => Some(*i as f64),
+            Value::Float(f) => Some(*f),
+            _ => None,
+        }
+    }
+
+    /// Downcast a native object to a concrete type (via
+    /// [`NativeObject::as_any`]).
+    pub fn downcast_native<T: 'static>(&self) -> Option<&T> {
+        match self {
+            Value::Native(n) => n.as_any()?.downcast_ref::<T>(),
+            _ => None,
         }
     }
 
@@ -127,6 +173,89 @@ impl Value {
             ),
         }
     }
+
+    /// Value equality per `docs/language.md` § 2.1: deep for data, identity
+    /// for functions and natives, `1 == 1.0`.
+    pub fn equals(&self, other: &Value) -> bool {
+        match (self, other) {
+            (Value::Nil, Value::Nil) => true,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Int(a), Value::Int(b)) => a == b,
+            (Value::Float(a), Value::Float(b)) => a == b,
+            (Value::Int(a), Value::Float(b)) | (Value::Float(b), Value::Int(a)) => {
+                (*a as f64) == *b
+            }
+            (Value::Str(a), Value::Str(b)) => a == b,
+            (Value::Duration(a), Value::Duration(b)) => a == b,
+            (Value::List(a), Value::List(b)) => {
+                if Rc::ptr_eq(a, b) {
+                    return true;
+                }
+                let (a, b) = (a.borrow(), b.borrow());
+                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.equals(y))
+            }
+            (Value::Map(a), Value::Map(b)) => {
+                if Rc::ptr_eq(a, b) {
+                    return true;
+                }
+                let (a, b) = (a.borrow(), b.borrow());
+                a.len() == b.len()
+                    && a.iter()
+                        .all(|(k, v)| b.get(k).map(|w| v.equals(w)).unwrap_or(false))
+            }
+            (Value::Fn(a), Value::Fn(b)) => Rc::ptr_eq(a, b),
+            (Value::Native(a), Value::Native(b)) => Rc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+
+    /// Ordering for `<`, `<=`, `>`, `>=`: numbers, strings, durations.
+    pub fn compare(&self, other: &Value) -> Option<Ordering> {
+        match (self, other) {
+            (Value::Int(a), Value::Int(b)) => Some(a.cmp(b)),
+            (Value::Str(a), Value::Str(b)) => Some(a.cmp(b)),
+            (Value::Duration(a), Value::Duration(b)) => Some(a.cmp(b)),
+            _ => {
+                let (a, b) = (self.as_f64()?, other.as_f64()?);
+                a.partial_cmp(&b)
+            }
+        }
+    }
+
+    /// Deep copy of lists and maps (used for actor messages); everything
+    /// else is shared.
+    pub fn deep_clone(&self) -> Value {
+        match self {
+            Value::List(l) => Value::list(l.borrow().iter().map(Value::deep_clone).collect()),
+            Value::Map(m) => Value::map(
+                m.borrow()
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.deep_clone()))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+}
+
+/// Human form of a duration: the largest unit that divides it exactly
+/// (`1h`, `3m`, `2s`, `500ms`), else fractional seconds (`1.5s`).
+pub fn format_duration(d: &Duration) -> String {
+    let ms = d.as_millis();
+    if ms == 0 {
+        return "0ms".into();
+    }
+    if ms % 3_600_000 == 0 {
+        format!("{}h", ms / 3_600_000)
+    } else if ms % 60_000 == 0 {
+        format!("{}m", ms / 60_000)
+    } else if ms % 1000 == 0 {
+        format!("{}s", ms / 1000)
+    } else if ms > 1000 {
+        format!("{}s", ms as f64 / 1000.0)
+    } else {
+        format!("{ms}ms")
+    }
 }
 
 impl fmt::Debug for Value {
@@ -139,17 +268,24 @@ impl fmt::Debug for Value {
             Value::Str(s) => write!(f, "{s:?}"),
             Value::List(l) => f.debug_list().entries(l.borrow().iter()).finish(),
             Value::Map(m) => f.debug_map().entries(m.borrow().iter()).finish(),
-            Value::Duration(d) => write!(f, "{}ms", d.as_millis()),
+            Value::Duration(d) => write!(f, "{}", format_duration(d)),
             Value::Fn(c) => write!(f, "<fn {}>", c.func.name),
             Value::Native(n) => write!(f, "<{}>", n.type_name()),
         }
     }
 }
 
+/// `print` / interpolation rules: strings raw, lists and maps as JSON,
+/// everything else in its literal form.
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Str(s) => write!(f, "{s}"),
+            Value::List(_) | Value::Map(_) => write!(f, "{}", self.to_json()),
+            Value::Native(n) => match n.to_json() {
+                Some(j) => write!(f, "{j}"),
+                None => write!(f, "<{}>", n.type_name()),
+            },
             other => write!(f, "{other:?}"),
         }
     }
@@ -182,14 +318,42 @@ impl Args {
     pub fn kw(&self, name: &str) -> Option<&Value> {
         self.kwargs.get(name)
     }
+
+    /// Positional argument `i`, or an error naming the function.
+    pub fn require(&self, i: usize, func: &str) -> Result<&Value, RuntimeError> {
+        self.positional.get(i).ok_or_else(|| {
+            RuntimeError::new(format!(
+                "{func}: missing argument {} (got {})",
+                i + 1,
+                self.positional.len()
+            ))
+        })
+    }
+
+    /// Error if any keyword argument is not in `allowed` (builtins reject
+    /// unknown keywords by name).
+    pub fn check_kwargs(&self, func: &str, allowed: &[&str]) -> Result<(), RuntimeError> {
+        for k in self.kwargs.keys() {
+            if !allowed.contains(&&**k) {
+                return Err(RuntimeError::new(format!(
+                    "{func}: unknown keyword argument `{k}`"
+                )));
+            }
+        }
+        Ok(())
+    }
 }
+
+/// A captured variable: shared between the closure and the frame that
+/// created it so assignments are visible on both sides.
+pub type Upvalue = Rc<RefCell<Value>>;
 
 /// A compiled function plus its captured environment.
 pub struct Closure {
     /// The compiled function.
     pub func: Rc<crate::bytecode::Function>,
-    /// Captured values (upvalues), indexed by the compiler.
-    pub captures: Vec<Value>,
+    /// Captured variables (upvalues), indexed by the compiler.
+    pub captures: Vec<Upvalue>,
 }
 
 impl Closure {
@@ -202,13 +366,20 @@ impl Closure {
     }
 }
 
+impl fmt::Debug for Closure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<fn {}>", self.func.name)
+    }
+}
+
 /// A host-provided object exposed to scripts (page, element, browser,
 /// actor reference, …). Methods are async because they usually hit CDP.
 pub trait NativeObject {
     /// Type name shown in errors and `print`.
     fn type_name(&self) -> &str;
 
-    /// Invoke `obj.name(args)`.
+    /// Invoke `obj.name(args)`. Calling the object itself (`obj(args)`)
+    /// invokes the method `__call__`.
     fn call_method<'a>(
         &'a self,
         vm: &'a mut Vm,
@@ -225,5 +396,88 @@ pub trait NativeObject {
     /// JSON form for `emit` and JSON-crossing calls. `None` → `null`.
     fn to_json(&self) -> Option<serde_json::Value> {
         None
+    }
+
+    /// Downcasting hook; return `Some(self)` to let the VM and stdlib
+    /// recognise the concrete type (ranges, builtin functions).
+    fn as_any(&self) -> Option<&dyn Any> {
+        None
+    }
+
+    /// Snapshot of the items for `for x in obj:` / `len(obj)`. `None` →
+    /// not iterable.
+    fn iter_items(&self) -> Option<Vec<Value>> {
+        None
+    }
+}
+
+/// `a..b` / `a..=b` — a lazy integer range (iterable; `len` works).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Range {
+    /// First value (inclusive).
+    pub start: i64,
+    /// End (exclusive).
+    pub end: i64,
+}
+
+impl Range {
+    /// Number of items.
+    pub fn len(&self) -> usize {
+        (self.end - self.start).max(0) as usize
+    }
+
+    /// Whether the range is empty.
+    pub fn is_empty(&self) -> bool {
+        self.end <= self.start
+    }
+}
+
+impl NativeObject for Range {
+    fn type_name(&self) -> &str {
+        "range"
+    }
+
+    fn call_method<'a>(
+        &'a self,
+        _vm: &'a mut Vm,
+        name: &str,
+        _args: Args,
+    ) -> LocalBoxFuture<'a, Result<Value, RuntimeError>> {
+        let name = name.to_string();
+        let r = *self;
+        Box::pin(async move {
+            match name.as_str() {
+                "len" => Ok(Value::Int(r.len() as i64)),
+                "to_list" => Ok(Value::list((r.start..r.end).map(Value::Int).collect())),
+                "contains" => Err(RuntimeError::new("range.contains: not supported")),
+                _ => Err(RuntimeError::new(format!(
+                    "range has no method `{name}` (available: len, to_list)"
+                ))),
+            }
+        })
+    }
+
+    fn get_prop(&self, name: &str) -> Option<Value> {
+        match name {
+            "start" => Some(Value::Int(self.start)),
+            "end" => Some(Value::Int(self.end)),
+            _ => None,
+        }
+    }
+
+    fn to_json(&self) -> Option<serde_json::Value> {
+        Some(serde_json::Value::Array(
+            (self.start..self.end)
+                .map(serde_json::Value::from)
+                .collect(),
+        ))
+    }
+
+    fn as_any(&self) -> Option<&dyn Any> {
+        Some(self)
+    }
+
+    fn iter_items(&self) -> Option<Vec<Value>> {
+        Some((self.start..self.end).map(Value::Int).collect())
     }
 }

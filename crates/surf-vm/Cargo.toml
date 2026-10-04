@@ -12,7 +12,7 @@ rust-version.workspace = true
 surf-syntax = { workspace = true }
 futures = { workspace = true }
 indexmap = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["preserve_order"] }
 
 [dev-dependencies]
 insta = { workspace = true }

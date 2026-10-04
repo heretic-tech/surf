@@ -1,12 +1,21 @@
 //! Bytecode representation.
+//!
+//! A straightforward stack machine. Every instruction is a small `Copy`
+//! enum; operands that are not inline (names, strings, numbers) live in the
+//! chunk's constant pool and are referenced by index.
+//!
+//! Call convention (see `docs/architecture.md`, "Keyword arguments"): the
+//! callee is pushed first, then the positional arguments in order, then one
+//! `(name, value)` pair per keyword argument — the name as a string
+//! constant. Keyword arguments therefore always *trail* the positionals on
+//! the stack and the `Call*` instruction carries both counts.
 
 use crate::value::Value;
 use std::rc::Rc;
 use surf_syntax::Span;
 
-/// Stack-VM opcodes. The final instruction set is defined by task 6; this
-/// is the minimal skeleton other crates may reference.
-#[derive(Debug, Clone, PartialEq)]
+/// Stack-VM opcodes.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Op {
     /// Push `constants[i]`.
     Const(u32),
@@ -16,6 +25,8 @@ pub enum Op {
     Bool(bool),
     /// Pop and discard.
     Pop,
+    /// Duplicate the top of stack.
+    Dup,
     /// Push local slot.
     GetLocal(u32),
     /// Pop into local slot.
@@ -24,7 +35,7 @@ pub enum Op {
     GetUpvalue(u32),
     /// Pop into captured value.
     SetUpvalue(u32),
-    /// Push a global by constant-name index (stdlib → host fallback).
+    /// Push a global by constant-name index (host → stdlib fallback).
     GetGlobal(u32),
     /// Build list of top `n` values.
     List(u32),
@@ -38,17 +49,29 @@ pub enum Op {
     Unary(surf_syntax::ast::UnaryOp),
     /// Binary op.
     Binary(surf_syntax::ast::BinaryOp),
-    /// Unconditional jump to absolute offset.
+    /// Unconditional forward jump to absolute offset.
     Jump(u32),
+    /// Unconditional backward jump (loop back-edge; checks cancellation).
+    Loop(u32),
     /// Pop; jump if falsy.
     JumpIfFalse(u32),
-    /// Peek; jump if falsy (for `and` / `or` short-circuit).
+    /// Peek; jump if falsy (for `and` short-circuit).
     JumpIfFalseKeep(u32),
-    /// Peek; jump if truthy.
+    /// Peek; jump if truthy (for `or` short-circuit).
     JumpIfTrueKeep(u32),
-    /// Call with `positional` positional args and `kwargs` keyword args
-    /// (names are pushed as constants before their values).
+    /// Call a value with `positional` positional args and `kwargs` keyword
+    /// args (names are pushed as constants before their values).
     Call {
+        /// Positional arg count.
+        positional: u32,
+        /// Keyword arg count.
+        kwargs: u32,
+    },
+    /// Call a global by name (constant index) — user `fn`s, stdlib, bare
+    /// browser actions via `Host::call_global`. No callee on the stack.
+    CallGlobal {
+        /// Constant index of the name.
+        name: u32,
         /// Positional arg count.
         positional: u32,
         /// Keyword arg count.
@@ -65,41 +88,81 @@ pub enum Op {
     },
     /// `recv.name`
     GetField(u32),
-    /// `recv.name = v`
+    /// `recv.name = v` (stack: recv, v).
     SetField(u32),
     /// `recv[i]`
     GetIndex,
-    /// `recv[i] = v`
+    /// `recv[i] = v` (stack: recv, i, v).
     SetIndex,
     /// Make a closure from `functions[i]`, capturing per the function's
     /// upvalue descriptors.
     Closure(u32),
+    /// If parameter `slot` was not supplied by the caller, fall through to
+    /// the default-value code; otherwise jump to `skip`.
+    ParamDefault {
+        /// Parameter slot.
+        slot: u32,
+        /// Where to continue when the argument was supplied.
+        skip: u32,
+    },
     /// Return top of stack.
     Return,
-    /// Set up an iterator over top of stack.
+    /// Pop an iterable and start iterating it (pushed on the frame's
+    /// iterator stack).
     IterStart,
-    /// Advance iterator; push next or jump to offset when done.
+    /// Advance the innermost iterator; push the next item or jump to the
+    /// offset when exhausted (the iterator is dropped on exhaustion).
     IterNext(u32),
+    /// Drop the innermost iterator (used by `break`).
+    IterEnd,
     /// `emit` top of stack.
     Emit,
     /// `exit` with top of stack as code (nil → 0).
     Exit,
-    /// `spawn`: callee + args as in `Call`, dispatched to `Host::spawn`.
+    /// `spawn name(args)`: args as in `Call`, dispatched to `Host::spawn`.
     Spawn {
+        /// Constant index of the callee name.
+        name: u32,
         /// Positional arg count.
         positional: u32,
         /// Keyword arg count.
         kwargs: u32,
     },
-    /// `parallel for`: items, body closure, opts map on stack.
-    ParallelFor,
+    /// `spawn recv.name(args)`: receiver below the args, dispatched to
+    /// `Host::spawn_method`.
+    SpawnMethod {
+        /// Constant index of the method name.
+        name: u32,
+        /// Positional arg count.
+        positional: u32,
+        /// Keyword arg count.
+        kwargs: u32,
+    },
+    /// `parallel for`: items, body closure, then `kwargs` `(name, value)`
+    /// option pairs on the stack.
+    ParallelFor {
+        /// Option count.
+        kwargs: u32,
+    },
     /// Begin `try` region; `catch` handler at offset.
     TryBegin(u32),
-    /// End `try` region.
+    /// End `try` region (normal exit or early leave).
     TryEnd,
-    /// Hand a declaration to the host; operands are on the stack per
-    /// `DeclKind`.
-    Declare(DeclKind),
+    /// Hand a declaration to the host. Stack layout per [`DeclKind`]:
+    /// `props` triples `(name, value, lazy: bool)` followed by the body
+    /// closure (`Fn`/`Task`/`Actor`/`Supervisor`), the props map (`Config`)
+    /// or `props` handler args + body closure (`Handler`).
+    Declare {
+        /// Declaration kind.
+        kind: DeclKind,
+        /// Constant index of the name (event name for handlers; `browser`
+        /// for config blocks).
+        name: u32,
+        /// Constant index of the alias (config) or `u32::MAX`.
+        alias: u32,
+        /// Property / argument count.
+        props: u32,
+    },
 }
 
 /// Which declaration `Op::Declare` builds.
@@ -147,9 +210,11 @@ pub struct Chunk {
 pub struct Function {
     /// Name (`<main>` for the program body, `<lambda>` for lambdas).
     pub name: Rc<str>,
-    /// Parameter names in order.
+    /// Parameter names in order (they occupy the first local slots).
     pub params: Vec<Rc<str>>,
-    /// Number of local slots to reserve.
+    /// Which parameters have a default value (same length as `params`).
+    pub has_default: Vec<bool>,
+    /// Number of local slots to reserve (including parameters).
     pub locals: u32,
     /// Upvalue capture descriptors.
     pub upvalues: Vec<UpvalueDesc>,
@@ -157,6 +222,20 @@ pub struct Function {
     pub chunk: Chunk,
     /// Span of the declaration.
     pub span: Span,
+    /// Byte offset of the start of every source line (shared by every
+    /// function of a program); empty when the source was not available.
+    pub line_starts: Rc<[u32]>,
+}
+
+impl Function {
+    /// 1-based line of byte offset `offset`, if the line table is known.
+    pub fn line_of(&self, offset: u32) -> Option<u32> {
+        if self.line_starts.is_empty() {
+            return None;
+        }
+        let idx = self.line_starts.partition_point(|&s| s <= offset);
+        Some(idx as u32)
+    }
 }
 
 /// A whole compiled program.
