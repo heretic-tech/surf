@@ -18,7 +18,7 @@ surf-vm = { workspace = true }
 surf-cdp = { workspace = true }
 surf-browser = { workspace = true }
 surf-runtime = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["io-std"] }
 clap = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -26,5 +26,5 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-axum = { workspace = true }
+surf-testserver = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }

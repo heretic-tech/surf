@@ -1,0 +1,8 @@
+# screenshot(path) writes a PNG; fs.exists sees it.
+base = env("SURF_E2E_BASE")
+dir = env("SURF_E2E_TMP")
+goto("{base}/text.html")
+screenshot("{dir}/shot.png")
+print(fs.exists("{dir}/shot.png"))
+screenshot("{dir}/full.png", full: true)
+print(fs.exists("{dir}/full.png"))

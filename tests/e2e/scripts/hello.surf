@@ -1,0 +1,4 @@
+# The canonical hello, against the fixture server: prints the index page's h1.
+base = env("SURF_E2E_BASE")
+page.goto("{base}/")
+print(text("h1"))

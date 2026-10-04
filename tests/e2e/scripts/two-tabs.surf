@@ -1,0 +1,10 @@
+# page(n) auto-creates; two tabs in one browser.
+base = env("SURF_E2E_BASE")
+page(1).goto("{base}/forms.html")
+page(2).goto("{base}/nav.html")
+
+page(1).type("#username", "surf")
+print(page(2).title())
+print(page(1).value("#username"))
+print(page(2).text("#nav-title"))
+print(len(browser.pages()))

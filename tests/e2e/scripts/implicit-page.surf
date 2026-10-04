@@ -1,0 +1,9 @@
+# Bare actions, `page` and `browser.<action>` all mean the sole page.
+base = env("SURF_E2E_BASE")
+goto("{base}/text.html")
+print(title() == page.title())
+print(url() == browser.url())
+print(page.index)
+print(count("p") > 0)
+print(exists("#nope"))
+print(page.open)

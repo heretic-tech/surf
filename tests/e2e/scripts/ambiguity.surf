@@ -1,0 +1,14 @@
+# With several pages open a bare action names them and shows the fix.
+base = env("SURF_E2E_BASE")
+page(1).goto("{base}/forms.html")
+page(2).goto("{base}/nav.html")
+page("login").goto("{base}/text.html")
+try:
+    click("#submit")
+catch e:
+    print(e.message)
+try:
+    browser.goto("{base}/")
+catch e:
+    print(e.message)
+print(page("login").title())

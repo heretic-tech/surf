@@ -1,0 +1,12 @@
+# eval returns JSON values; a zero-arg lambda body is sent verbatim.
+# Braces in a Surf string interpolate, so JavaScript object literals are
+# written with \{ … \}.
+base = env("SURF_E2E_BASE")
+goto("{base}/forms.html")
+emit eval("(\{a: 1, b: [1, 2, 'x'], c: null, d: true\})")
+print(eval("1 + 1"))
+print(eval("document.title"))
+print(eval(fn(): document.querySelectorAll("input").length))
+v = eval("undefined")
+print(v == nil)
+print(type(eval("'s'")))

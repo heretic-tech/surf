@@ -1,0 +1,12 @@
+# on element_appears: the MutationObserver lives in the isolated world and
+# reports through Runtime.bindingCalled — no Runtime.enable, no DOM.enable.
+# The main body ends after goto; the program stays alive until the handler
+# fires and calls exit.
+on element_appears("#appeared"):
+    print("appeared: {event.text()}")
+    print(text("#appeared") == event.text())
+    exit
+
+base = env("SURF_E2E_BASE")
+goto("{base}/delayed.html")
+print("waiting")

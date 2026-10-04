@@ -1,0 +1,11 @@
+# examples/login.surf against the fixture's form: type, type, click, read back.
+browser:
+    virtual: true
+
+base = env("SURF_E2E_BASE")
+page.goto("{base}/forms.html")
+type("#username", "user")
+type("#password", "pass")
+click("#submit")
+print(text("#submitted"))
+print(value("#username"))
