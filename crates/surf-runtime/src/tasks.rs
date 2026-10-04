@@ -11,9 +11,9 @@ pub async fn spawn(
     name: &str,
     args: Args,
 ) -> Result<Value, RuntimeError> {
-    let _ = (rt.pages().len(), vm.cancel_token(), args);
+    let _ = (rt.lifetime().running(), vm.cancel_token(), args);
     Err(RuntimeError::new(format!(
-        "spawn {name}: not implemented yet (task 8)"
+        "spawn {name}: not implemented yet — it arrives with task 8 (concurrency)"
     )))
 }
 
@@ -25,8 +25,14 @@ pub async fn parallel_for(
     body: Rc<Closure>,
     opts: Args,
 ) -> Result<Value, RuntimeError> {
-    let _ = (rt.pages().len(), vm.cancel_token(), items, body, opts);
+    let _ = (
+        rt.lifetime().running(),
+        vm.cancel_token(),
+        items,
+        body,
+        opts,
+    );
     Err(RuntimeError::new(
-        "parallel for: not implemented yet (task 8)",
+        "parallel for: not implemented yet — it arrives with task 8 (concurrency)",
     ))
 }

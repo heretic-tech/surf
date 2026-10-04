@@ -1029,13 +1029,13 @@ dependencies = [
 name = "surf-cli"
 version = "0.1.0"
 dependencies = [
- "axum",
  "clap",
  "serde_json",
  "surf-browser",
  "surf-cdp",
  "surf-runtime",
  "surf-syntax",
+ "surf-testserver",
  "surf-vm",
  "tempfile",
  "tokio",

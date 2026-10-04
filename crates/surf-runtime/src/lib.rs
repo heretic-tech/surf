@@ -31,38 +31,39 @@
 //!   tasks run; `exit` cancels every task and closes every browser.
 //!
 //! Single-threaded: tokio `current_thread` + `LocalSet`, `Rc` values.
+//! Everything here must run inside a `LocalSet` (handler invocations are
+//! `spawn_local`ed).
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod actors;
+pub mod browsers;
 pub mod builtins;
 pub mod config;
+pub mod errors;
 pub mod handlers;
 pub mod host;
 pub mod lifetime;
+pub mod methods;
 pub mod objects;
 pub mod pages;
 pub mod supervisors;
 pub mod tasks;
 
+pub use errors::is_no_browser;
 pub use host::{Runtime, RuntimeOptions};
+pub use lifetime::EXIT_INTERRUPTED;
 
-use std::rc::Rc;
 use surf_vm::RuntimeError;
 
 /// Parse, compile and run a script to completion (including waiting for
-/// handlers / tasks per the lifetime rule). Returns the process exit code.
+/// handlers / tasks per the lifetime rule) and close every browser.
+/// Returns the process exit code; a runtime error is returned *after*
+/// shutdown so the caller only has to render it.
 pub async fn run_source(name: &str, source: &str, opts: RuntimeOptions) -> Result<i32, RunError> {
-    let program = surf_syntax::parse(name, source).map_err(RunError::Syntax)?;
-    let compiled = surf_vm::compile_with_source(name, source, &program)
-        .map_err(|e| RunError::Syntax(e.into_diagnostics(name)))?;
     let runtime = Runtime::new(opts);
-    let globals = Rc::new(surf_vm::Globals::stdlib());
-    let mut vm = surf_vm::Vm::new(runtime.clone(), globals);
-    let result = vm.run(&compiled).await;
-    let code = runtime.finish(result).await?;
-    Ok(code)
+    runtime.run(name, source).await
 }
 
 /// Top-level failure of `run_source`.
