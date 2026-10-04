@@ -1,8 +1,0 @@
-{
-  "writeScope": "project",
-  "readScope": "all",
-  "cleanup": {
-    "lastCleanupAt": null,
-    "sessionsSinceCleanup": 1
-  }
-}

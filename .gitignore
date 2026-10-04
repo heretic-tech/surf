@@ -1,14 +1,9 @@
 /target/
 **/target/
-.empryo/*.db*
-.empryo/sessions/
-.empryo/genome-writer.lock*
 *.log
 /tmp-profiles/
 .DS_Store
-# volatile agent-tool state (changes on every step)
-.empryo/orchestrations/runs/
-.empryo/desktop/
-.empryo/desktop-owned-sessions.json
-.empryo/background/
+# agent-tool state (dispatch logs, orchestrations, plans, sessions, dbs);
+# none of it belongs in the repo — see AGENTS.md "Commits".
+.empryo/
 /tools/out/
