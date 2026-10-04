@@ -221,6 +221,11 @@ lambda. Lambdas capture variables by reference (closures). A block lambda
 is only possible where the `:` ends a line — not inside `(…)` / `[…]` /
 `{…}`, where newlines are ignored.
 
+Because blocks do not introduce scopes (§ 3.1), closures created in a loop
+all share the loop variable: `for i in 1..=3: fs.push(fn(): i)` yields three
+functions that return `3`. Pass the value through a parameter
+(`make(i)`) to snapshot it.
+
 ---
 
 ## 3. Statements
@@ -638,10 +643,32 @@ before the first statement runs (so the example above needs no start call).
 
 `len keys values push pop join split trim upper lower contains starts_with
 ends_with replace json parse_json int float str type range now random
-read_file write_file append_file env fail sleep print`
+read_file write_file append_file env fail sleep print assert`
 
 `now()` returns milliseconds since the epoch. `random()` returns a float in
-`[0, 1)`; `random(n)` an int in `[0, n)`.
+`[0, 1)`; `random(n)` an int in `[0, n)`; `random(a, b)` an int in `[a, b)`.
+`env("NAME")` is `nil` when unset (`env("NAME", default)` for a fallback).
+`assert(cond, msg)` raises `assertion failed: msg`. `fail(msg, selector:
+…, cdp_method: …)` raises an error with those fields. Builtins reject
+unknown keyword arguments by name.
+
+The first fourteen are also **methods** on their first argument
+(`len(xs)` ≡ `xs.len()`), alongside:
+
+| receiver | methods |
+|----------|---------|
+| str | `len upper lower trim split(sep?) lines chars contains starts_with ends_with replace(a, b) to_int to_float index_of slice(a, b?)` |
+| list | `len push(v…) pop first last contains index_of join(sep?) reverse slice(a, b?) map(f) filter(f) each(f) sort(key?, by: f, reverse: bool)` |
+| map | `len keys values has(k) get(k, default?) remove(k) set(k, v) entries`; `m.f(…)` calls a function stored under `f` |
+| duration | `ms seconds` |
+| range | `len to_list`, `.start`, `.end`, indexing |
+
+`map`, `filter`, `sort`, `reverse` and `slice` return new lists; `push`,
+`pop`, `set`, `remove` mutate in place.
+
+Two builtin objects: `json.parse(s)` / `json.stringify(v, pretty: false)`
+and `fs.read(p)` / `fs.write(p, s)` / `fs.append(p, s)` / `fs.exists(p)`
+(file access always goes through the runtime, never the VM).
 
 ---
 

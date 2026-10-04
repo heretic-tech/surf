@@ -256,13 +256,17 @@ pub trait NativeObject {
     fn call_method<'a>(&'a self, vm: &'a mut Vm, name: &str, args: Args) -> LocalBoxFuture<'a, Result<Value, RuntimeError>>;
     fn get_prop(&self, name: &str) -> Option<Value> { None }
     fn to_json(&self) -> Option<serde_json::Value> { None }
+    fn as_any(&self) -> Option<&dyn Any> { None }          // downcast hook (ranges, builtin fns)
+    fn iter_items(&self) -> Option<Vec<Value>> { None }    // `for x in obj:` / `len(obj)`
 }
+// Calling a native value (`obj(args)`) invokes `call_method(vm, "__call__", args)`.
 
 pub trait Host {
     fn declare(&self, decl: Declaration);
     fn resolve_global(&self, name: &str) -> Option<Value>;
     fn call_global<'a>(&'a self, vm: &'a mut Vm, name: &str, args: Args) -> LocalBoxFuture<'a, Result<Value, RuntimeError>>;
     fn spawn<'a>(&'a self, vm: &'a mut Vm, name: &str, args: Args) -> LocalBoxFuture<'a, Result<Value, RuntimeError>>;
+    fn spawn_method<'a>(&'a self, vm: &'a mut Vm, receiver: Value, name: &str, args: Args) -> LocalBoxFuture<'a, Result<Value, RuntimeError>> { /* default: error */ }
     fn parallel_for<'a>(&'a self, vm: &'a mut Vm, items: Value, body: Rc<Closure>, opts: Args) -> LocalBoxFuture<'a, Result<Value, RuntimeError>>;
     fn sleep<'a>(&'a self, d: Duration) -> LocalBoxFuture<'a, ()>;
     fn print(&self, s: &str);
@@ -290,22 +294,85 @@ pub struct RuntimeError {
     pub cause: Option<Box<dyn std::error::Error>>,
 }
 
+impl RuntimeError {
+    pub fn exit(code: i32) -> Self;        // `exit` travels as an error with an `ExitRequest` cause
+    pub fn cancelled() -> Self;            // cooperative cancellation, `Cancelled` cause
+    pub fn exit_code(&self) -> Option<i32>;
+    pub fn is_catchable(&self) -> bool;    // false for exit / cancellation
+    pub fn to_diagnostic(&self) -> surf_syntax::Diagnostic;
+    pub fn to_value(&self, line: Option<u32>) -> Value;   // the `catch e:` map
+}
+
 pub struct Vm;
 impl Vm {
     pub fn new(host: Rc<dyn Host>, globals: Rc<Globals>) -> Vm;
     pub fn fork(&self) -> Vm;                       // same host/globals/cancel token, fresh stack
     pub async fn run(&mut self, program: &CompiledProgram) -> Result<(), RuntimeError>;
     pub async fn call(&mut self, f: Rc<Closure>, args: Args) -> Result<Value, RuntimeError>;
+    pub fn call_value<'a>(&'a mut self, callee: Value, args: Args) -> LocalBoxFuture<'a, Result<Value, RuntimeError>>;
     pub fn cancel_token(&self) -> CancelToken;
 }
 
 pub fn compile(name: &str, program: &surf_syntax::ast::Program) -> Result<CompiledProgram, CompileError>;
+pub fn compile_with_source(name: &str, source: &str, program: &Program) -> Result<CompiledProgram, CompileError>; // keeps a line table for `e.line`
 ```
 
 Property semantics: config props are evaluated eagerly at declaration time
 (`env(...)` allowed). Task/actor/supervisor props are `Prop::Const` for
-literals and `Prop::Lazy` thunks for anything that must be evaluated at use
-time (`on_fail: shift_proxy()` runs once per failure, never at declaration).
+literals and bare symbols (`strategy: one_for_one`) and `Prop::Lazy` thunks
+for anything that must be evaluated at use time (`on_fail: shift_proxy()`
+runs once per failure, never at declaration).
+
+#### VM design notes (task 6)
+
+- **Stack machine, one loop.** `Op` is a small `Copy` enum; constants live
+  in a per-chunk pool. Script→script calls push a frame and continue in the
+  same loop (no Rust recursion). Every native call (`Host::call_global`,
+  `NativeObject::call_method`, stdlib) returns a `LocalBoxFuture` the loop
+  awaits in place; natives call back into script code through `Vm::call`,
+  which runs a nested loop on the same stack. The boxed future is what
+  breaks the async-recursion cycle.
+- **Global resolution order** for a bare name `f(...)` that is not a local
+  or upvalue: `Host::resolve_global(f)` (user `fn`s, `page`, `browser`,
+  `self`, task/actor names) → stdlib `Globals` → `Host::call_global(f)`
+  (bare browser actions). So the host can shadow a stdlib name, and
+  unknown names reach the host without the VM materialising a value.
+- **Keyword arguments — trailing kwargs slot.** The call convention pushes
+  the callee, then the positional arguments, then one `(name, value)` pair
+  per keyword argument (the name as a string constant); `Call`,
+  `CallGlobal`, `CallMethod`, `Spawn` carry both counts. Keywords therefore
+  always *trail* the positionals on the stack and are popped into
+  `Args.kwargs` in source order. For script closures, keywords bind by
+  parameter name (unknown keyword / argument given twice / missing required
+  parameter are runtime errors naming the parameter); defaults are
+  evaluated by the callee's prologue (`ParamDefault`) only for parameters
+  the caller did not supply. Natives receive `Args` and validate keywords
+  themselves (`Args::check_kwargs`).
+- **Scoping.** Locals are function-scoped; a cheap pre-scan of each body
+  collects every assigned name so the slot exists before the first
+  assignment regardless of position. A nested function assigning a name
+  that exists in an enclosing function updates it (no `nonlocal`); a name
+  that exists nowhere becomes a local of the nested function. Captured
+  variables are *boxed on capture*: the slot is upgraded to an
+  `Rc<RefCell<Value>>` when a closure captures it, so both sides see every
+  assignment. Hoisted items (`fn`, `task`, `actor`, `supervisor`, `on`,
+  `browser:`) are compiled as closures of `<main>` (they can read top-level
+  variables) and delivered via `Op::Declare` → `Host::declare` before the
+  first statement runs.
+- **try/catch** is a handler stack (`TryBegin`/`TryEnd`) scoped to the
+  current `Vm::call`; on an error the VM unwinds frames/stack/iterators to
+  the handler and pushes `RuntimeError::to_value` (`message`, `selector`,
+  `cdp_method`, `line`). `exit(n)` and cancellation are errors with marker
+  causes that no handler catches. `break`/`continue`/`return` emit the
+  `TryEnd`s (and `IterEnd`) needed to leave the regions they cross.
+- **Cancellation** is checked at loop back-edges (`Loop`) and before every
+  native call; `CancelToken` is shared by `Vm::fork`.
+- **Ranges** are a `Native` (`surf_vm::Range`, lazy; `len`, indexing and
+  iteration work without materialising). `json` and `fs` are native
+  objects registered in `Globals`; stdlib functions referenced as values
+  (`f = len`) are `BuiltinFn` natives.
+- **Cold start** (parse + compile + run of a 20-line script) is asserted
+  < 20 ms in a debug build by `crates/surf-vm/tests/fixtures.rs`.
 
 ### surf-browser: discovery and launch
 

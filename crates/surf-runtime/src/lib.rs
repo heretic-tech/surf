@@ -55,8 +55,8 @@ use surf_vm::RuntimeError;
 /// handlers / tasks per the lifetime rule). Returns the process exit code.
 pub async fn run_source(name: &str, source: &str, opts: RuntimeOptions) -> Result<i32, RunError> {
     let program = surf_syntax::parse(name, source).map_err(RunError::Syntax)?;
-    let compiled =
-        surf_vm::compile(name, &program).map_err(|e| RunError::Syntax(e.into_diagnostics(name)))?;
+    let compiled = surf_vm::compile_with_source(name, source, &program)
+        .map_err(|e| RunError::Syntax(e.into_diagnostics(name)))?;
     let runtime = Runtime::new(opts);
     let globals = Rc::new(surf_vm::Globals::stdlib());
     let mut vm = surf_vm::Vm::new(runtime.clone(), globals);

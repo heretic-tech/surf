@@ -71,6 +71,25 @@ something; link the PR / commit that picks it up.
       `parallel for` props and handler events live in `parser.rs`
       (`BROWSER_PROPS`, …). When the runtime adds a key, update the list and
       `docs/language.md` together (consider generating one from the other).
+- [ ] surf-syntax: a statement that starts with a list literal
+      (`[1, 2].each(f)`) fails to parse (`expected `]`, found `,``); the
+      statement parser treats a leading `[` as something else. Assign to a
+      name first as a workaround.
+- [ ] surf-vm: `spawn` of a non-global callee (`f = fn(): …; spawn f()`) is
+      a compile error; only `spawn name(…)` (→ `Host::spawn`) and
+      `spawn recv.m(…)` (→ `Host::spawn_method`) exist. Add a
+      `Host::spawn_value` if scripts need it.
+- [ ] surf-vm: parameter defaults are limited to the first 64 parameters
+      (a `u64` "missing" mask per frame); more parameters silently treat
+      the default as supplied.
+- [ ] surf-vm: `now()` and `random()` seed from `std::time::SystemTime`
+      directly (compiles on wasm32 but panics there at runtime); route
+      through a `Host::now` when the wasm build lands.
+- [ ] surf-vm: reads of a function-scoped variable before its first
+      assignment yield `nil` (the pre-scan allocates the slot); consider an
+      "unassigned" marker to report `used before assignment` instead.
+- [ ] surf-vm: `Op` is an enum of up to 16 bytes; if a profile ever shows
+      dispatch cost, pack to u32 words. Not worth it for IO-bound scripts.
 
 ## Tooling
 - [ ] LSP server (`surf lsp`) + VS Code extension with a TextMate grammar.
