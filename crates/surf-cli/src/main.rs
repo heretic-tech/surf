@@ -77,7 +77,12 @@ enum Command {
     },
     /// Diagnose the local Chrome installation (discovery, display, a timed
     /// pipe launch).
-    Doctor,
+    Doctor {
+        /// Also load the local detector page (tools/detector) in a launched
+        /// browser and print every check's result.
+        #[arg(long)]
+        detector: bool,
+    },
     /// Interactive session: one line (or indented block) at a time; the
     /// browser and its pages stay open between lines. `.exit` ends it.
     Repl {
@@ -112,11 +117,20 @@ fn normalise_args() -> Vec<OsString> {
 }
 
 fn main() {
+    // For the `first CDP frame sent N ms after start` line of --trace-cdp.
+    surf_cdp::connection::mark_process_start();
     let cli = Cli::parse_from(normalise_args());
+    // `--trace-cdp` turns the frame trace on at `debug` even when RUST_LOG
+    // is unset (the default filter is `warn`).
+    let default_filter = if cli.trace_cdp {
+        "warn,surf_cdp::trace=debug"
+    } else {
+        "warn"
+    };
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter)),
         )
         .with_writer(std::io::stderr)
         .init();
@@ -137,7 +151,7 @@ fn main() {
                 commands::run(file, commands::options(&opts, cli.chrome, cli.trace_cdp)).await
             }
             Command::Check { file } => commands::check(file).await,
-            Command::Doctor => commands::doctor(cli.chrome).await,
+            Command::Doctor { detector } => commands::doctor(cli.chrome, detector).await,
             Command::Repl { opts } => {
                 commands::repl(commands::options(&opts, cli.chrome, cli.trace_cdp)).await
             }

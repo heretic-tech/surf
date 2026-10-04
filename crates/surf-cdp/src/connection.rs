@@ -22,7 +22,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::time::Instant;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 /// Capacity of every per-method event channel. A subscriber that falls
@@ -43,6 +44,19 @@ const TRACE_MAX_BYTES: usize = 4096;
 
 /// Target of the frame trace (`RUST_LOG=surf_cdp::trace=debug`).
 const TRACE_TARGET: &str = "surf_cdp::trace";
+
+/// When the process started, for the one `info` line the trace emits:
+/// `first CDP frame sent N ms after start` (a cold-start measurement the
+/// perf gate reads back). Set by [`mark_process_start`]; falls back to the
+/// creation of the first [`Connection`].
+static PROCESS_START: OnceLock<Instant> = OnceLock::new();
+static FIRST_FRAME_LOGGED: AtomicBool = AtomicBool::new(false);
+
+/// Record "now" as the process start for the first-frame trace line. Call
+/// once, as early as possible in `main`; later calls are ignored.
+pub fn mark_process_start() {
+    let _ = PROCESS_START.set(Instant::now());
+}
 
 type RawResult = Result<Box<RawValue>, CdpError>;
 
@@ -244,6 +258,14 @@ impl Connection {
             armed: true,
         };
         if self.trace_enabled() {
+            if !FIRST_FRAME_LOGGED.swap(true, Ordering::Relaxed) {
+                let since = PROCESS_START.get_or_init(Instant::now).elapsed();
+                tracing::info!(
+                    target: TRACE_TARGET,
+                    "first CDP frame sent {:.1} ms after start",
+                    since.as_secs_f64() * 1e3
+                );
+            }
             tracing::debug!(target: TRACE_TARGET, "→ {}", trace_text(&frame));
         }
         if self.outgoing.send(Outgoing::Frame(frame)).is_err() {
