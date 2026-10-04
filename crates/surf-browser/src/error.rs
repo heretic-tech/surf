@@ -35,13 +35,27 @@ pub enum BrowserError {
         /// The selector involved.
         selector: String,
     },
-    /// Timed out waiting for a condition.
-    #[error("timed out after {after_ms} ms: {what}")]
+    /// An action timed out waiting for its element / condition.
+    #[error("{}", timeout_message(action, selector.as_deref(), *waited_ms, last_state.as_deref()))]
     Timeout {
-        /// Description of what was awaited.
-        what: String,
-        /// Timeout in milliseconds.
-        after_ms: u64,
+        /// The action (`click`, `wait_text`, `goto`, …).
+        action: String,
+        /// The selector involved, if any.
+        selector: Option<String>,
+        /// How long was waited, in milliseconds.
+        waited_ms: u64,
+        /// What the element looked like on the last poll (`not found`,
+        /// `hidden`, `disabled`, `moving`), if known.
+        last_state: Option<String>,
+    },
+    /// JavaScript threw inside an `eval` / helper.
+    #[error("{}", script_message(text, *line))]
+    Script {
+        /// Exception text (`Uncaught TypeError: …`).
+        text: String,
+        /// 0-based line of the throw site within the evaluated source, if
+        /// Chrome reported one.
+        line: Option<i64>,
     },
     /// Navigation failed (`net::ERR_*`).
     #[error("navigation to {url} failed: {reason}")]
@@ -50,6 +64,18 @@ pub enum BrowserError {
         url: String,
         /// Chrome's reason string.
         reason: String,
+    },
+    /// A bare action was used while several pages are open.
+    #[error("several pages are open ({}) — say which: page(2).…", names.join(", "))]
+    Ambiguous {
+        /// Pages in creation order: `1`, `2`, `"login"`.
+        names: Vec<String>,
+    },
+    /// The page (or its target) is closed.
+    #[error("page {index} is closed")]
+    PageClosed {
+        /// Creation index.
+        index: usize,
     },
     /// Feature that is reserved but not available.
     #[error("{0}")]
@@ -60,6 +86,40 @@ pub enum BrowserError {
     /// JSON.
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+impl BrowserError {
+    /// Whether this is a CDP protocol error whose message contains `needle`
+    /// (used to spot destroyed execution contexts and closed targets).
+    pub fn protocol_message_contains(&self, needle: &str) -> bool {
+        matches!(self, BrowserError::Cdp(surf_cdp::CdpError::Protocol { message, .. }) if message.contains(needle))
+    }
+}
+
+fn timeout_message(
+    action: &str,
+    selector: Option<&str>,
+    waited_ms: u64,
+    last_state: Option<&str>,
+) -> String {
+    let secs = waited_ms as f64 / 1000.0;
+    let mut s = match selector {
+        Some(sel) => format!("{action}({sel:?}): timed out after {secs:.1}s"),
+        None => format!("{action}: timed out after {secs:.1}s"),
+    };
+    if let Some(state) = last_state {
+        s.push_str(" (");
+        s.push_str(state);
+        s.push(')');
+    }
+    s
+}
+
+fn script_message(text: &str, line: Option<i64>) -> String {
+    match line {
+        Some(l) => format!("script error at line {}: {text}", l + 1),
+        None => format!("script error: {text}"),
+    }
 }
 
 fn not_found_message(tried: &[String]) -> String {

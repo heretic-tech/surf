@@ -13,23 +13,28 @@
 //!   pair, spawn the process, wire fd 3 / fd 4, capture a stderr tail,
 //!   detect crashes, and run the shutdown ladder ([`launch::Launched::close`]).
 //! - [`display`]: Linux `virtual: true` — manage an Xvfb server automatically.
-//! - [`browser`]: the [`Browser`] handle: browser contexts, target
-//!   lifecycle, proxy rotation, graceful shutdown (`Browser.close` → wait →
-//!   kill), one logical browser may own several OS processes.
+//! - [`browser`]: the [`Browser`] handle: page registry (`page(n)` /
+//!   `page("name")` auto-create, `sole_page` for bare actions), browser
+//!   contexts for per-page proxies / isolation, graceful shutdown
+//!   (`Browser.close` → wait → kill); one logical browser may later own
+//!   several OS processes.
 //! - [`page`]: the [`Page`] handle (`Rc<PageInner>`) whose backing
 //!   `{session, target_id, browser_context_id, frame_id}` can be swapped
 //!   by [`Page::rebind`] with cookie / storage / URL migration. Serves
 //!   supervisor restarts, `shift_proxy()`, and future per-page personas.
+//!   Navigation waits on `Page.lifecycleEvent`; dialogs follow a policy;
+//!   screenshots, PDF, viewport, cookies live here too.
 //! - [`world`]: isolated worlds via `Page.createIsolatedWorld` and
 //!   evaluation through `Runtime.callFunctionOn{executionContextId}`;
 //!   `Runtime.addBinding{executionContextId}` + `Runtime.bindingCalled`
 //!   for the world → runtime channel. **Never `Runtime.enable`.**
 //! - [`selector`]: CSS (default), `text=…`, `xpath=…` / `//…` resolution,
 //!   via a helper installed in the isolated world under a random name.
-//! - [`actions`]: auto-waiting actions (attached → visible → stable →
-//!   enabled, up to `timeout`): `goto click type fill press hover check
-//!   select scroll text html attr value exists count all wait wait_gone
-//!   wait_text wait_url eval screenshot pdf url title back reload …`.
+//! - [`actions`]: auto-waiting actions as methods on [`Page`] / [`Element`]
+//!   (attached → visible → stable → enabled, up to `timeout`): `click
+//!   dblclick hover type fill press check uncheck select scroll focus text
+//!   html attr value exists count all first wait wait_gone wait_text
+//!   wait_url`.
 //! - [`input`]: `Input.dispatchMouseEvent` / `dispatchKeyEvent` /
 //!   `insertText` with coordinates from `DOM.getContentQuads` (no
 //!   `DOM.enable`).
@@ -59,16 +64,19 @@ pub mod network;
 pub mod observer;
 pub mod page;
 pub mod selector;
+pub mod util;
 pub mod world;
 
-pub use browser::Browser;
+pub use actions::{ActionOptions, Element};
+pub use browser::{Browser, NewPageOptions};
+pub use cookies::Cookie;
 pub use discovery::{chrome_or_skip, Found};
 pub use display::VirtualDisplay;
 pub use error::BrowserError;
 pub use launch::{
     launch, CdpMode, LaunchConfig, LaunchOptions, Launched, ProxySpec, TransportChoice,
 };
-pub use page::{Backing, Migration, Page};
+pub use page::{Backing, Dialog, DialogPolicy, Migration, Page, WaitUntil};
 pub use selector::Selector;
 pub use world::World;
 
