@@ -1,0 +1,23 @@
+[package]
+name = "surf-runtime"
+description = "Surf host: implicit browser/page resolution, bare actions, handlers, tasks, actors, supervisors"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+surf-syntax = { workspace = true }
+surf-vm = { workspace = true }
+surf-cdp = { workspace = true }
+surf-browser = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+indexmap = { workspace = true }
+regex = { workspace = true }

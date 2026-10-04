@@ -1,0 +1,25 @@
+# A Scout actor fetches a token and broadcasts it; Workers wait for it and
+# use it. A supervisor restarts whichever actor crashes.
+browser:
+    headless: true
+
+actor Scout():
+    goto("https://example.com")
+    token = eval("document.title")
+    broadcast({kind: "token", value: token})
+
+actor Worker(n):
+    msg = receive(timeout: 30s)
+    if msg == nil:
+        print("worker {n}: no token")
+        return
+    goto("https://example.com/?w={n}&t={msg.value}")
+    emit {worker: n, token: msg.value, title: title()}
+
+supervisor Crew:
+    strategy: one_for_one
+    max_restarts: 3
+    within: 60s
+    spawn Scout()
+    parallel for n in 1..=3:
+        spawn Worker(n)

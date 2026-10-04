@@ -1,0 +1,18 @@
+[package]
+name = "surf-vm"
+description = "Bytecode compiler and single-threaded async interpreter for Surf (wasm32-clean)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+surf-syntax = { workspace = true }
+futures = { workspace = true }
+indexmap = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }

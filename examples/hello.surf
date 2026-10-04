@@ -1,0 +1,2 @@
+page.goto("https://example.com")
+print(text("h1"))

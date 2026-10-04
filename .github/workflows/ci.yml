@@ -1,0 +1,97 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p surf-syntax -p surf-vm --target wasm32-unknown-unknown
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+        with:
+          chrome-version: stable
+      - name: Install xvfb (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: cargo test (Linux, under xvfb)
+        if: runner.os == 'Linux'
+        env:
+          SURF_CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: xvfb-run -a cargo test --workspace
+      - name: cargo test (macOS)
+        if: runner.os == 'macOS'
+        env:
+          SURF_CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: cargo test --workspace
+
+  e2e:
+    needs: [test]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+        with:
+          chrome-version: stable
+      - name: Install xvfb (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: e2e (Linux, under xvfb)
+        if: runner.os == 'Linux'
+        env:
+          SURF_CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: xvfb-run -a cargo test -p surf-cli --test e2e -- --nocapture
+      - name: e2e (macOS)
+        if: runner.os == 'macOS'
+        env:
+          SURF_CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: cargo test -p surf-cli --test e2e -- --nocapture

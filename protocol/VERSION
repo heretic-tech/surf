@@ -1,0 +1,7 @@
+source: https://github.com/ChromeDevTools/devtools-protocol
+files: json/browser_protocol.json json/js_protocol.json
+commit: d209a9a38897d2935a078a0bf00ca821811d21ed
+commit-date: 2026-10-03T04:42:47Z
+commit-message: Roll protocol to r1710668
+protocol-version: 1.3
+fetched: 2026-10-05

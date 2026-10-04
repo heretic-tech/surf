@@ -1,0 +1,21 @@
+# Fetch many pages concurrently. Each parallel body gets its own page.
+browser:
+    headless: true
+    timeout: 20s
+
+urls = [
+    "https://example.com",
+    "https://example.org",
+    "https://example.net",
+]
+
+task fetch_title(url):
+    retry: 3
+    timeout: 30s
+    goto(url)
+    return {url: url, title: title()}
+
+parallel for url in urls:
+    limit: 2
+    fail_fast: false
+    emit fetch_title(url)

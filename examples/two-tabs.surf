@@ -1,0 +1,6 @@
+# Two tabs in one browser. page(n) auto-creates; names map to creation order.
+page(1).goto("https://example.com")
+page(2).goto("https://example.org")
+
+page(1).type("input[name=q]", "surf")
+print(page(2).title())

@@ -1,0 +1,16 @@
+[package]
+name = "surf-syntax"
+description = "Lexer, parser, AST and diagnostics for the Surf scripting language (wasm32-clean)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ariadne = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }

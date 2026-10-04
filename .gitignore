@@ -1,0 +1,8 @@
+/target/
+**/target/
+.empryo/*.db*
+.empryo/sessions/
+.empryo/genome-writer.lock*
+*.log
+/tmp-profiles/
+.DS_Store

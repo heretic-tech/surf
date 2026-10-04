@@ -1,0 +1,5 @@
+# Emit one JSON line per link: {"text": "...", "href": "..."}
+goto("https://example.com")
+
+for a in all("a"):
+    emit {text: a.text(), href: a.attr("href")}

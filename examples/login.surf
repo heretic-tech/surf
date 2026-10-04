@@ -1,0 +1,7 @@
+browser:
+    virtual: true
+
+page.goto("https://example.com/login")
+type("#username", "user")
+type("#password", "pass")
+click("#submit")

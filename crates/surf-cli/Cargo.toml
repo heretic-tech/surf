@@ -1,0 +1,30 @@
+[package]
+name = "surf-cli"
+description = "The `surf` command: run, check, doctor, repl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "surf"
+path = "src/main.rs"
+
+[dependencies]
+surf-syntax = { workspace = true }
+surf-vm = { workspace = true }
+surf-cdp = { workspace = true }
+surf-browser = { workspace = true }
+surf-runtime = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
