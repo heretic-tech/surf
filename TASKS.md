@@ -139,16 +139,9 @@ something; link the PR / commit that picks it up.
       is acceptable (rustls is already pulled in by tokio-tungstenite).
       Also: pin to a requested version (`surf install 131`), prune old
       versions, print the discovery order.
-- [ ] `examples/hello.surf` prints `text("h1")` of https://example.com, but
-      IANA's 2025 redesign of that page has no `<h1>` any more (observed
-      2026-10-04: the body is `<p>` + `<a>`), so the live example times out
-      on `h1` while `title()` / `text("p")` work. The canonical form is
-      pinned by the brief and by `surf-syntax`'s parse snapshot; decide
-      whether to change the example (and `docs/language.md`'s opener) or
-      point it at a page that still has a heading. The e2e `hello` script
-      runs the same program against the fixture server.
 - [ ] `examples/two-tabs.surf` types into `input[name=q]` on example.com,
-      which has no such input; same decision as above.
+      which has no such input (IANA's 2025 redesign; `hello.surf` was
+      switched to `print(title())` for the same reason in step 8).
 - [ ] `surf-browser/tests/pages.rs::auto_wait_and_timeouts` asserts
       `text("#appeared")` took ≥ 500 ms; under a full `cargo test --workspace`
       (several Chromes at once) the navigation can finish late enough that

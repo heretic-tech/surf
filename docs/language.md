@@ -11,7 +11,7 @@ carry the selector and the CDP method that failed.
 
 ```
 page.goto("https://example.com")
-print(text("h1"))
+print(title())
 ```
 
 ---

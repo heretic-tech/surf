@@ -1,4 +1,4 @@
-# The canonical hello, against the fixture server: prints the index page's h1.
+# The canonical hello, against the fixture server: prints the index page's title.
 base = env("SURF_E2E_BASE")
 page.goto("{base}/")
-print(text("h1"))
+print(title())
