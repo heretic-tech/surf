@@ -1,0 +1,5 @@
+boom 1
+boom 2
+boom 3
+supervisor Crew: actor Boom#4 failed 3 times within 10s (max_restarts: 2) — giving up; last error: always
+restarts: 2 done: true

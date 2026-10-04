@@ -1,0 +1,19 @@
+# max_restarts exceeded: the supervisor fails with an error naming the child
+# and its last error; join() re-raises it. No browser needed.
+boom = 0
+
+actor Boom():
+    boom = boom + 1
+    print("boom {boom}")
+    fail("always")
+
+supervisor Crew:
+    max_restarts: 2
+    within: 10s
+    spawn Boom()
+
+try:
+    Crew.join()
+catch e:
+    print(e.message)
+print("restarts: {Crew.restarts} done: {Crew.done}")

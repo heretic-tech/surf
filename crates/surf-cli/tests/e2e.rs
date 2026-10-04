@@ -4,8 +4,12 @@
 //! `tests/e2e/scripts/<name>.surf` is run with `surf run --headless`; its
 //! stdout must equal `<name>.out` byte for byte and the exit code must be
 //! `0` (or the number in `<name>.code` when present). Scripts reach the
-//! fixture server through `env("SURF_E2E_BASE")` and a scratch directory
-//! through `env("SURF_E2E_TMP")`.
+//! fixture server through `env("SURF_E2E_BASE")`, a scratch directory
+//! through `env("SURF_E2E_TMP")`, two forward-proxy stubs through
+//! `env("SURF_E2E_PROXY_A")` / `env("SURF_E2E_PROXY_B")` (they tag what
+//! they forward, see `surf_testserver::Proxy`) and the fixture server under
+//! a non-loopback host name through `env("SURF_E2E_PROXIED_BASE")`
+//! (`http://surf.test:<port>` — Chrome never proxies loopback hosts).
 //!
 //! Skip (with a printed message) when no Chrome is found; `SURF_CHROME`
 //! overrides discovery. These MUST run on developer Macs and in the `e2e`
@@ -14,7 +18,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use surf_browser::discovery::chrome_or_skip;
-use surf_testserver::Fixture;
+use surf_testserver::{Fixture, Proxy};
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -29,6 +33,8 @@ fn scripts_dir() -> PathBuf {
 struct Server {
     _rt: tokio::runtime::Runtime,
     fixture: Fixture,
+    proxy_a: Proxy,
+    proxy_b: Proxy,
 }
 
 impl Server {
@@ -39,7 +45,20 @@ impl Server {
             .build()
             .expect("tokio runtime");
         let fixture = rt.block_on(Fixture::start());
-        Server { _rt: rt, fixture }
+        let proxy_a = rt.block_on(Proxy::start("A"));
+        let proxy_b = rt.block_on(Proxy::start("B"));
+        Server {
+            _rt: rt,
+            fixture,
+            proxy_a,
+            proxy_b,
+        }
+    }
+
+    /// The fixture under a host name Chrome does not treat as loopback.
+    fn proxied_base(&self) -> String {
+        let port = self.fixture.base.rsplit(':').next().unwrap_or("80");
+        format!("http://surf.test:{port}")
     }
 }
 
@@ -59,6 +78,9 @@ fn run_surf(chrome: &Path, server: &Server, tmp: &Path, script: &Path, extra: &[
         .args(extra)
         .env("SURF_CHROME", chrome)
         .env("SURF_E2E_BASE", &server.fixture.base)
+        .env("SURF_E2E_PROXIED_BASE", server.proxied_base())
+        .env("SURF_E2E_PROXY_A", &server.proxy_a.url)
+        .env("SURF_E2E_PROXY_B", &server.proxy_b.url)
         .env("SURF_E2E_TMP", tmp)
         .env("NO_COLOR", "1")
         .env_remove("SURF_TRACE_CDP")
@@ -117,6 +139,46 @@ fn scripts_match_expected_output() {
         }
     }
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}
+
+/// 50 concurrent pages in one browser (`parallel for` without a limit)
+/// complete well under the 30 s budget.
+#[test]
+fn fifty_concurrent_pages_under_thirty_seconds() {
+    let Some(chrome) = chrome_or_skip("fifty_concurrent_pages_under_thirty_seconds") else {
+        return;
+    };
+    let server = Server::start();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let script = tmp.path().join("fifty.surf");
+    std::fs::write(
+        &script,
+        "base = env(\"SURF_E2E_BASE\")\nparallel for i in 1..=50:\n    goto(\"{base}/slow?ms=100&i={i}\")\n    emit {i: i, slow: text(\"#slow\"), page: page.index}\n",
+    )
+    .unwrap();
+    let started = std::time::Instant::now();
+    let r = run_surf(&chrome, &server, tmp.path(), &script, &[]);
+    let elapsed = started.elapsed();
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    let lines: Vec<serde_json::Value> = r
+        .stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("json line"))
+        .collect();
+    assert_eq!(lines.len(), 50, "{}", r.stdout);
+    let mut pages: Vec<u64> = lines.iter().map(|l| l["page"].as_u64().unwrap()).collect();
+    pages.sort_unstable();
+    pages.dedup();
+    assert_eq!(pages.len(), 50, "every item has its own page");
+    assert!(lines.iter().all(|l| l["slow"] == "slept 100"));
+    eprintln!(
+        "50 concurrent pages: {:.1}s end to end",
+        elapsed.as_secs_f64()
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(30),
+        "took {elapsed:?}"
+    );
 }
 
 #[test]

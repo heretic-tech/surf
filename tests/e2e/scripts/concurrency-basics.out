@@ -1,0 +1,12 @@
+joined: 42 name double done true
+5 [1,4,9,16,25]
+ok after 3 with arg
+caught: parallel for: 1 of 3 items failed
+  item 2 (2): bad 2
+caught: parallel for: item 1 (1) failed, the rest were cancelled: item 1 failed
+a got 1 as Echo
+a got 2 as Echo
+done
+broadcast reached 1
+listener heard hello
+listener heard stop

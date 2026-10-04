@@ -1,0 +1,20 @@
+# An actor that fails twice then succeeds; the supervisor restarts it on
+# the same page (new target, same context) and the output proves 3 attempts.
+base = env("SURF_E2E_BASE")
+attempts = 0
+
+actor Fragile():
+    attempts = attempts + 1
+    goto("{base}/?attempt={attempts}")
+    if attempts < 3:
+        fail("attempt {attempts} crashed")
+    emit {attempt: attempts, title: title(), page: page.index}
+
+supervisor Crew:
+    strategy: one_for_one
+    max_restarts: 3
+    within: 60s
+    spawn Fragile()
+
+Crew.join()
+print("attempts: {attempts} restarts: {Crew.restarts} children: {Crew.children}")

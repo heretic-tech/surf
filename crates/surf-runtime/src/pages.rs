@@ -1,18 +1,26 @@
 //! Implicit page resolution (`docs/language.md` § 5).
 //!
 //! The page registry itself lives in [`surf_browser::Browser`] (`page(n)`,
-//! `page("name")`, `sole_page`). This module adds the two runtime rules on
-//! top: which *browser* a bare action means, and the per-task private page
-//! — inside a handler body (and, from task 8, a spawned task / actor /
-//! `parallel for` item) the first bare action binds a page to that task so
-//! concurrent bodies never fight over one tab.
+//! `page("name")`). This module adds the runtime rules on top: which
+//! *browser* a bare action means, and the per-task **private page** —
+//! inside a spawned task / actor / `parallel for` item the first bare
+//! action creates a page private to that task (named `task#id`, in its
+//! own browser context when the task is `fresh`), closed when the task
+//! ends; a handler body is bound to the page its event fired on. Private
+//! pages never count for the main body's "sole page" rule, so `spawn
+//! worker()` followed by `goto(…)` in the main body still works; explicit
+//! `page(n)` always reads the shared registry.
+//!
+//! [`Runtime::rebind`] is the one path every rebind takes (`fresh: true`
+//! retries, `shift_proxy()`, supervisor restarts): it re-installs every
+//! handler observer on the page's new session afterwards.
 
 use crate::browsers::{several_browsers_message, BrowserSlot, DEFAULT_ALIAS};
-use crate::errors::convert;
+use crate::errors::{ambiguous_message, convert};
 use crate::host::Runtime;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use surf_browser::{Browser, NewPageOptions, Page};
+use surf_browser::{Browser, Migration, NewPageOptions, Page, RebindTarget};
 use surf_vm::RuntimeError;
 
 /// What kind of task the current code runs in.
@@ -34,6 +42,10 @@ pub struct TaskCtx {
     pub kind: TaskKind,
     /// The page bare actions resolve to, once bound.
     pub page: RefCell<Option<(Rc<Browser>, Page)>>,
+    /// Name the private page is registered under (`fetch#3`).
+    pub label: String,
+    /// Create the private page in its own browser context (`fresh: true`).
+    pub isolated: Cell<bool>,
 }
 
 impl TaskCtx {
@@ -42,15 +54,35 @@ impl TaskCtx {
         Rc::new(TaskCtx {
             kind: TaskKind::Handler,
             page: RefCell::new(Some((browser, page))),
+            label: "handler".into(),
+            isolated: Cell::new(false),
         })
     }
 
-    /// A spawned task with no page yet.
-    pub fn spawned() -> Rc<TaskCtx> {
+    /// A spawned task with no page yet; its first bare action creates one
+    /// named `label` (isolated in its own context when `isolated`).
+    pub fn spawned(label: &str, isolated: bool) -> Rc<TaskCtx> {
         Rc::new(TaskCtx {
             kind: TaskKind::Spawned,
             page: RefCell::new(None),
+            label: label.to_owned(),
+            isolated: Cell::new(isolated),
         })
+    }
+
+    /// A spawned task that inherits an existing page (supervisor restart).
+    pub fn spawned_with(label: &str, browser: Rc<Browser>, page: Page) -> Rc<TaskCtx> {
+        Rc::new(TaskCtx {
+            kind: TaskKind::Spawned,
+            page: RefCell::new(Some((browser, page))),
+            label: label.to_owned(),
+            isolated: Cell::new(false),
+        })
+    }
+
+    /// The bound page, if open.
+    pub fn open_page(&self) -> Option<(Rc<Browser>, Page)> {
+        self.page.borrow().clone().filter(|(_, p)| p.is_open())
     }
 }
 
@@ -91,31 +123,149 @@ impl Runtime {
     }
 
     /// The page a bare action resolves to: the task's private page when
-    /// inside a handler / spawned task, otherwise the sole page of the
-    /// default browser (created when none exists; an error listing the
-    /// pages when several are open).
+    /// inside a handler / spawned task (created on first use), otherwise
+    /// the sole shared page of the default browser (created when none
+    /// exists; an error listing the pages when several are open).
     pub async fn sole_page(&self, action: &str) -> Result<(Rc<Browser>, Page), RuntimeError> {
         let ctx = current_ctx();
-        if let Some(ctx) = &ctx {
-            if let Some((b, p)) = ctx.page.borrow().clone() {
-                if p.is_open() {
-                    return Ok((b, p));
-                }
-            }
+        if let Some((b, p)) = ctx.as_ref().and_then(|c| c.open_page()) {
+            return Ok((b, p));
         }
         let browser = self.default_browser(action).await?;
-        let page = match ctx.as_ref().map(|c| c.kind) {
-            Some(TaskKind::Handler) | Some(TaskKind::Spawned) => browser
-                .new_page(NewPageOptions::default())
-                .await
-                .map_err(|e| convert(e, action))?,
-            _ => browser.sole_page().await.map_err(|e| convert(e, action))?,
+        let page = match &ctx {
+            Some(ctx) => {
+                let page = browser
+                    .new_page(NewPageOptions {
+                        name: Some(ctx.label.clone()),
+                        isolated: ctx.isolated.get(),
+                        proxy: None,
+                    })
+                    .await
+                    .map_err(|e| convert(e, action))?;
+                self.private_pages
+                    .borrow_mut()
+                    .insert((self.alias_of(&browser), page.index()));
+                *ctx.page.borrow_mut() = Some((browser.clone(), page.clone()));
+                page
+            }
+            None => self.shared_sole_page(&browser, action).await?,
         };
-        if let Some(ctx) = &ctx {
-            *ctx.page.borrow_mut() = Some((browser.clone(), page.clone()));
-        }
         self.instrument(&browser);
         Ok((browser, page))
+    }
+
+    /// The sole page of `browser` ignoring tasks' private pages: created
+    /// when none exists, an error naming them when several are open.
+    pub async fn shared_sole_page(
+        &self,
+        browser: &Rc<Browser>,
+        action: &str,
+    ) -> Result<Page, RuntimeError> {
+        let alias = self.alias_of(browser);
+        let shared: Vec<Page> = browser
+            .pages()
+            .into_iter()
+            .filter(|p| {
+                !self
+                    .private_pages
+                    .borrow()
+                    .contains(&(alias.clone(), p.index()))
+            })
+            .collect();
+        match shared.len() {
+            0 => browser
+                .new_page(NewPageOptions::default())
+                .await
+                .map_err(|e| convert(e, action)),
+            1 => Ok(shared[0].clone()),
+            _ => Err(RuntimeError::new(ambiguous_message(
+                &shared.iter().map(Page::label).collect::<Vec<_>>(),
+                action,
+            ))),
+        }
+    }
+
+    /// Whether `page` is a task's private page.
+    pub fn is_private(&self, browser: &Rc<Browser>, page: &Page) -> bool {
+        self.private_pages
+            .borrow()
+            .contains(&(self.alias_of(browser), page.index()))
+    }
+
+    /// Close a task's private page when the task ends (best effort; skipped
+    /// when the program is exiting — shutdown closes everything).
+    pub async fn release_private_page(&self, ctx: &TaskCtx) {
+        let Some((browser, page)) = ctx.page.borrow_mut().take() else {
+            return;
+        };
+        self.private_pages
+            .borrow_mut()
+            .remove(&(self.alias_of(&browser), page.index()));
+        if self.lifetime().exit_code().is_some() || !page.is_open() {
+            return;
+        }
+        if let Err(e) = browser.close_page(&page).await {
+            tracing::debug!("closing private page {}: {e}", page.label());
+        }
+    }
+
+    /// Move `page` onto a new target per `target`, then re-install every
+    /// handler observer on its new session. The page the current task's
+    /// bare actions use is unchanged (same handle).
+    pub async fn rebind(
+        &self,
+        browser: &Rc<Browser>,
+        page: &Page,
+        target: RebindTarget,
+        migration: Migration,
+        action: &str,
+    ) -> Result<(), RuntimeError> {
+        browser
+            .rebind_page_to(page, target, migration)
+            .await
+            .map_err(|e| convert(e, action))?;
+        self.after_rebind(browser, page);
+        Ok(())
+    }
+
+    /// `fresh: true` between attempts: move the current page (if any) to
+    /// a new, empty browser context — cookies and storage gone, the proxy
+    /// (if the page has one) kept.
+    pub async fn fresh_page(&self, action: &str) -> Result<(), RuntimeError> {
+        let Some((browser, page)) = self.current_page() else {
+            return Ok(());
+        };
+        self.rebind(
+            &browser,
+            &page,
+            RebindTarget::FreshContext,
+            Migration::default(),
+            action,
+        )
+        .await
+    }
+
+    /// The page the current code's bare actions resolve to, if it already
+    /// exists: the task's private page, or the shared sole page of the
+    /// default browser (`None` when nothing is open yet).
+    pub fn current_page(&self) -> Option<(Rc<Browser>, Page)> {
+        if let Some(ctx) = current_ctx() {
+            return ctx.open_page();
+        }
+        let slot = self.default_slot("page").ok()?;
+        let browser = slot.browser()?;
+        let alias = self.alias_of(&browser);
+        let shared: Vec<Page> = browser
+            .pages()
+            .into_iter()
+            .filter(|p| {
+                !self
+                    .private_pages
+                    .borrow()
+                    .contains(&(alias.clone(), p.index()))
+            })
+            .collect();
+        (shared.len() == 1).then(|| (browser, shared[0].clone()))
     }
 
     /// `page(n)` on `browser` (auto-creates up to `n`).
@@ -161,17 +311,10 @@ impl Runtime {
         Ok(page)
     }
 
-    /// If the default browser is live and has exactly one page, that page
-    /// (synchronous peek for `page.index` / `emit page`).
+    /// If the current code's page already exists, that page (synchronous
+    /// peek for `page.index` / `emit page`).
     pub fn peek_sole_page(&self) -> Option<(Rc<Browser>, Page)> {
-        let slot = self.default_slot("page").ok()?;
-        let browser = slot.browser()?;
-        let pages = browser.pages();
-        if pages.len() == 1 {
-            Some((browser, pages[0].clone()))
-        } else {
-            None
-        }
+        self.current_page()
     }
 }
 

@@ -1,0 +1,45 @@
+# Scout sets a cookie on its own page and broadcasts its value; five Workers
+# receive it, set it on their own (isolated) pages and read it back; a
+# Collector gathers the results so the output is ordered.
+base = env("SURF_E2E_BASE")
+
+actor Collector():
+    got = []
+    while len(got) < 5:
+        m = receive(timeout: 30s)
+        if m == nil:
+            break
+        if m.kind == "result":
+            got.push(m)
+    got = got.sort(by: fn(r): r.worker)
+    for r in got:
+        emit {worker: r.worker, cookie: r.cookie, page: r.page}
+
+actor Worker(n):
+    loop:
+        msg = receive(timeout: 30s)
+        if msg == nil:
+            print("worker {n}: no token")
+            return
+        if msg.kind == "token":
+            break
+    goto("{base}/")
+    set_cookie("token", "{msg.value}-{n}")
+    goto("{base}/cookie-echo")
+    broadcast({kind: "result", worker: n, cookie: text("body"), page: page.index != 1})
+
+actor Scout():
+    goto("{base}/set-cookie?token=s3cr3t")
+    token = nil
+    for c in cookies():
+        if c.name == "token":
+            token = c.value
+    broadcast({kind: "token", value: token})
+
+supervisor Crew:
+    spawn Collector()
+    parallel for n in 1..=5:
+        spawn Worker(n)
+    spawn Scout()
+
+Crew.join()

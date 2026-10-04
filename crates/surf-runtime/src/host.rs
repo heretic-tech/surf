@@ -7,6 +7,8 @@ use crate::config::BrowserConfig;
 use crate::handlers::{spawn_observer, HandlerDecl, HandlerEvent};
 use crate::lifetime::{Lifetime, EXIT_INTERRUPTED};
 use crate::objects::{BareAction, BrowserObject, PageObject};
+use crate::supervisors::{SupervisorObject, SupervisorRun};
+use crate::tasks::{current_task, SelfObject, TaskDecl, TaskInfo};
 use crate::RunError;
 use futures::future::LocalBoxFuture;
 use indexmap::IndexMap;
@@ -14,7 +16,7 @@ use std::cell::{Cell, Ref, RefCell};
 use std::collections::HashSet;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
-use surf_browser::Browser;
+use surf_browser::{Browser, Page};
 use surf_vm::{
     Args, Closure, CompiledProgram, Declaration, FsOp, Globals, Host, RuntimeError, Value, Vm,
 };
@@ -53,10 +55,18 @@ pub struct Runtime {
     source: RefCell<Source>,
     browsers: RefCell<IndexMap<String, Rc<BrowserSlot>>>,
     functions: RefCell<IndexMap<String, Rc<Closure>>>,
-    declarations: RefCell<Vec<Declaration>>,
+    /// `task` / `actor` declarations by name.
+    decls: RefCell<IndexMap<String, Rc<TaskDecl>>>,
+    /// Supervisors by name (started at declaration).
+    supervisors: RefCell<IndexMap<String, Rc<SupervisorRun>>>,
+    /// Live tasks by id.
+    tasks: RefCell<IndexMap<u64, Rc<TaskInfo>>>,
+    next_task_id: Cell<u64>,
     handlers: RefCell<Vec<Rc<HandlerDecl>>>,
     /// Pages (browser alias, page index) that already have an observer.
     observed: RefCell<HashSet<(String, usize)>>,
+    /// Tasks' private pages (browser alias, page index).
+    pub(crate) private_pages: RefCell<HashSet<(String, usize)>>,
     lifetime: Lifetime,
     template: RefCell<Option<Vm>>,
     globals: Rc<Globals>,
@@ -73,9 +83,13 @@ impl Runtime {
             source: RefCell::new(Source::default()),
             browsers: RefCell::new(IndexMap::new()),
             functions: RefCell::new(IndexMap::new()),
-            declarations: RefCell::new(Vec::new()),
+            decls: RefCell::new(IndexMap::new()),
+            supervisors: RefCell::new(IndexMap::new()),
+            tasks: RefCell::new(IndexMap::new()),
+            next_task_id: Cell::new(1),
             handlers: RefCell::new(Vec::new()),
             observed: RefCell::new(HashSet::new()),
+            private_pages: RefCell::new(HashSet::new()),
             lifetime: Lifetime::default(),
             template: RefCell::new(None),
             globals: Rc::new(Globals::stdlib()),
@@ -131,6 +145,59 @@ impl Runtime {
             return vm;
         }
         self.vm()
+    }
+
+    /// A VM for a spawned task: shares the globals but has its **own**
+    /// cancel token (`h.cancel()`, supervisor restarts); program exit
+    /// reaches tasks through [`Lifetime::exit_signal`] instead.
+    pub fn task_vm(&self) -> Vm {
+        Vm::new(self.rc(), self.globals.clone())
+    }
+
+    // ───────────────────────── tasks ─────────────────────────
+
+    /// Allocate the next task id.
+    pub fn next_task_id(&self) -> u64 {
+        let id = self.next_task_id.get();
+        self.next_task_id.set(id + 1);
+        id
+    }
+
+    /// Record a live task.
+    pub fn register_task(&self, info: Rc<TaskInfo>) {
+        self.tasks.borrow_mut().insert(info.id, info);
+    }
+
+    /// Forget a finished task.
+    pub fn unregister_task(&self, id: u64) {
+        self.tasks.borrow_mut().shift_remove(&id);
+    }
+
+    /// A live task by id.
+    pub fn task(&self, id: u64) -> Option<Rc<TaskInfo>> {
+        self.tasks.borrow().get(&id).cloned()
+    }
+
+    /// Every live task, in spawn order.
+    pub fn live_tasks(&self) -> Vec<Rc<TaskInfo>> {
+        self.tasks.borrow().values().cloned().collect()
+    }
+
+    /// A declared `task` / `actor` by name.
+    pub fn task_decl(&self, name: &str) -> Option<Rc<TaskDecl>> {
+        self.decls.borrow().get(name).cloned()
+    }
+
+    /// A declared supervisor by name.
+    pub fn supervisor(&self, name: &str) -> Option<Rc<SupervisorRun>> {
+        self.supervisors.borrow().get(name).cloned()
+    }
+
+    /// Names a `spawn` could target (for suggestions).
+    pub fn callable_names(&self) -> Vec<String> {
+        let mut names = self.user_fn_names();
+        names.extend(self.decls.borrow().keys().cloned());
+        names
     }
 
     // ───────────────────────── browsers / declarations ─────────────────────────
@@ -190,36 +257,46 @@ impl Runtime {
         self.functions.borrow().keys().cloned().collect()
     }
 
-    /// `Some(kind)` when `name` is a declared task / actor / supervisor
-    /// (whose semantics arrive with task 8).
-    pub fn declared_kind(&self, name: &str) -> Option<&'static str> {
-        self.declarations.borrow().iter().find_map(|d| match d {
-            Declaration::Task { name: n, .. } if n == name => Some("task"),
-            Declaration::Actor { name: n, .. } if n == name => Some("actor"),
-            Declaration::Supervisor { name: n, .. } if n == name => Some("supervisor"),
-            _ => None,
-        })
+    /// The alias of the slot `browser` belongs to (`default` when unknown).
+    pub fn alias_of(&self, browser: &Rc<Browser>) -> String {
+        self.browsers
+            .borrow()
+            .iter()
+            .find(|(_, s)| s.browser().is_some_and(|b| Rc::ptr_eq(&b, browser)))
+            .map(|(a, _)| a.clone())
+            .unwrap_or_else(|| DEFAULT_ALIAS.to_owned())
+    }
+
+    /// After `Page::rebind`: the old session (and its observer) is gone, so
+    /// install the handlers again on the new one.
+    pub fn after_rebind(&self, browser: &Rc<Browser>, page: &Page) {
+        let key = (self.alias_of(browser), page.index());
+        self.observed.borrow_mut().remove(&key);
+        self.instrument(browser);
     }
 
     /// Declared `element_appears` handlers.
     pub fn element_handlers(&self) -> Vec<Rc<HandlerDecl>> {
+        self.handlers_for(HandlerEvent::ElementAppears)
+    }
+
+    /// Declared `navigation` handlers.
+    pub fn navigation_handlers(&self) -> Vec<Rc<HandlerDecl>> {
+        self.handlers_for(HandlerEvent::Navigation)
+    }
+
+    fn handlers_for(&self, event: HandlerEvent) -> Vec<Rc<HandlerDecl>> {
         self.handlers
             .borrow()
             .iter()
-            .filter(|h| h.event == HandlerEvent::ElementAppears)
+            .filter(|h| h.event == event)
             .cloned()
             .collect()
     }
 
     /// Install observers on every page of `browser` that has none yet.
     pub fn instrument(&self, browser: &Rc<Browser>) {
-        let alias = self
-            .browsers
-            .borrow()
-            .iter()
-            .find(|(_, s)| s.browser().is_some_and(|b| Rc::ptr_eq(&b, browser)))
-            .map(|(a, _)| a.clone())
-            .unwrap_or_else(|| DEFAULT_ALIAS.to_owned());
+        let alias = self.alias_of(browser);
         for page in browser.pages() {
             let key = (alias.clone(), page.index());
             if self.observed.borrow_mut().insert(key) {
@@ -260,13 +337,17 @@ impl Runtime {
             Err(e) if e.is_cancelled() => {}
             Err(e) => match e.exit_code() {
                 Some(code) => self.lifetime.request_exit(code),
-                None => {
-                    eprint!("{}", self.render_error(&e));
-                    eprintln!("surf: {what}: handler failed (see above)");
-                    self.lifetime.mark_failed();
-                }
+                None => self.report_failure(what, &e),
             },
         }
+    }
+
+    /// Report an uncaught error of a background task / handler /
+    /// supervisor on stderr; the exit code becomes 1.
+    pub fn report_failure(&self, what: &str, e: &RuntimeError) {
+        eprint!("{}", self.render_error(e));
+        eprintln!("surf: {what} failed (see above)");
+        self.lifetime.mark_failed();
     }
 
     // ───────────────────────── entry points ─────────────────────────
@@ -386,9 +467,19 @@ impl Host for Runtime {
                 self.functions.borrow_mut().insert(name, closure);
             }
             Declaration::Handler { event, args, body } => match HandlerEvent::parse(&event) {
-                Some(HandlerEvent::ElementAppears) => {
+                Some(HandlerEvent::Message) => match current_task() {
+                    Some(task) => {
+                        task.message_handlers.borrow_mut().push(body.clone());
+                        // Messages that arrived before the handler existed.
+                        while let Some(msg) = task.mailbox.pop() {
+                            crate::tasks::dispatch_message(&self.rc(), &task, body.clone(), msg);
+                        }
+                    }
+                    None => self.warn("on message: only works inside an actor body; ignored"),
+                },
+                Some(ev @ (HandlerEvent::ElementAppears | HandlerEvent::Navigation)) => {
                     self.handlers.borrow_mut().push(Rc::new(HandlerDecl {
-                        event: HandlerEvent::ElementAppears,
+                        event: ev,
                         args,
                         body,
                     }));
@@ -398,7 +489,7 @@ impl Host for Runtime {
                 }
                 Some(ev) => {
                     self.warn(&format!(
-                        "on {}: is not implemented yet (task 8/9); the handler never fires",
+                        "on {}: is not implemented yet (task 9, network hooks); the handler never fires",
                         ev.name()
                     ));
                     self.handlers.borrow_mut().push(Rc::new(HandlerDecl {
@@ -409,20 +500,50 @@ impl Host for Runtime {
                 }
                 None => self.warn(&format!("unknown handler event `{event}` ignored")),
             },
-            other => {
-                // task / actor / supervisor: stored for task 8.
-                let (kind, name) = match &other {
-                    Declaration::Task { name, .. } => ("task", name.clone()),
-                    Declaration::Actor { name, .. } => ("actor", name.clone()),
-                    Declaration::Supervisor { name, .. } => ("supervisor", name.clone()),
-                    _ => ("declaration", String::new()),
-                };
-                if kind == "supervisor" {
+            Declaration::Task {
+                name,
+                params,
+                props,
+                body,
+            } => {
+                self.decls.borrow_mut().insert(
+                    name.clone(),
+                    Rc::new(TaskDecl {
+                        name,
+                        actor: false,
+                        params,
+                        props,
+                        body,
+                    }),
+                );
+            }
+            Declaration::Actor {
+                name,
+                params,
+                props,
+                body,
+            } => {
+                self.decls.borrow_mut().insert(
+                    name.clone(),
+                    Rc::new(TaskDecl {
+                        name,
+                        actor: true,
+                        params,
+                        props,
+                        body,
+                    }),
+                );
+            }
+            Declaration::Supervisor { name, props, body } => {
+                if self.supervisors.borrow().contains_key(&name) {
                     self.warn(&format!(
-                        "supervisor {name}: supervisors do not start yet (task 8); nothing is spawned"
+                        "supervisor {name}: already declared and running; the new declaration is ignored"
                     ));
+                    return;
                 }
-                self.declarations.borrow_mut().push(other);
+                let sup = SupervisorRun::new(self.next_task_id(), &name, props, body);
+                sup.start(&self.rc());
+                self.supervisors.borrow_mut().insert(name, sup);
             }
         }
     }
@@ -437,10 +558,14 @@ impl Host for Runtime {
                 let slot = self.default_slot("goto").ok()?;
                 return Some(BrowserObject::value(self.rc(), slot));
             }
+            "self" => return current_task().map(SelfObject::value),
             _ => {}
         }
         if let Some(slot) = self.slot(name) {
             return Some(BrowserObject::value(self.rc(), slot));
+        }
+        if let Some(sup) = self.supervisor(name) {
+            return Some(SupervisorObject::value(sup));
         }
         crate::builtins::bare_action_name(name).map(|n| BareAction::value(self.rc(), n))
     }
@@ -462,7 +587,7 @@ impl Host for Runtime {
         args: Args,
     ) -> LocalBoxFuture<'a, Result<Value, RuntimeError>> {
         let name = name.to_string();
-        Box::pin(async move { crate::tasks::spawn(self, vm, &name, args).await })
+        Box::pin(async move { crate::tasks::spawn(&self.rc(), vm, &name, args).await })
     }
 
     fn parallel_for<'a>(
@@ -472,7 +597,7 @@ impl Host for Runtime {
         body: Rc<Closure>,
         opts: Args,
     ) -> LocalBoxFuture<'a, Result<Value, RuntimeError>> {
-        Box::pin(async move { crate::tasks::parallel_for(self, vm, items, body, opts).await })
+        Box::pin(async move { crate::tasks::parallel_for(&self.rc(), vm, items, body, opts).await })
     }
 
     fn sleep<'a>(&'a self, d: Duration) -> LocalBoxFuture<'a, ()> {

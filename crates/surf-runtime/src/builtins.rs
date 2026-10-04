@@ -1,9 +1,11 @@
 //! Bare-action globals and the other host-provided names.
 //!
 //! The VM resolves a bare name in this order: `Host::resolve_global`
-//! (user `fn`s, `page`, `browser`, named browsers, bare actions) → stdlib
-//! `Globals` → `Host::call_global` (everything else: `shift_proxy`, actor
-//! messaging, and the "undefined function" error with a suggestion).
+//! (user `fn`s, `page`, `browser`, named browsers, `self`, supervisors,
+//! bare actions) → stdlib `Globals` → `Host::call_global` (everything
+//! else: `task` calls, `shift_proxy`, `send` / `broadcast` / `receive` /
+//! `wait_for_message`, and the "undefined function" error with a
+//! suggestion).
 //! Bare actions are returned from `resolve_global` as callable values so
 //! they shadow stdlib names of the same spelling (`type`); see
 //! [`bare_action`] for the one-argument `type(v)` carve-out.
@@ -59,14 +61,13 @@ pub const BARE_ACTIONS: &[&str] = &[
     "dialogs",
 ];
 
-/// Names that exist in the language but whose implementation comes in a
-/// later step; calling them is a clear "not yet" error.
-const LATER: &[(&str, &str)] = &[
-    ("shift_proxy", "task 8 (proxy rotation)"),
-    ("send", "task 8 (actors)"),
-    ("broadcast", "task 8 (actors)"),
-    ("receive", "task 8 (actors)"),
-    ("wait_for_message", "task 8 (actors)"),
+/// Concurrency builtins provided by the runtime.
+const CONCURRENCY: &[&str] = &[
+    "shift_proxy",
+    "send",
+    "broadcast",
+    "receive",
+    "wait_for_message",
 ];
 
 /// Static name for a bare action (so `BareAction` values carry `&'static str`).
@@ -107,19 +108,25 @@ pub async fn call(
     if PAGE_METHODS.contains(&name) {
         return bare_action(rt, vm, name, args).await;
     }
-    if let Some((_, when)) = LATER.iter().find(|(n, _)| *n == name) {
-        return Err(RuntimeError::new(format!(
-            "{name}() is not implemented yet — it arrives with {when}"
-        )));
+    match name {
+        "shift_proxy" => return crate::tasks::shift_proxy(&rt.rc(), args).await,
+        "send" => return crate::actors::send(&rt.rc(), args),
+        "broadcast" => return crate::actors::broadcast(&rt.rc(), args),
+        "receive" | "wait_for_message" => return crate::actors::receive(name, args).await,
+        _ => {}
     }
-    if let Some(kind) = rt.declared_kind(name) {
+    if let Some(decl) = rt.task_decl(name) {
+        return crate::tasks::call_decl(&rt.rc(), vm, decl, args).await;
+    }
+    if rt.supervisor(name).is_some() {
         return Err(RuntimeError::new(format!(
-            "{kind} {name} is declared, but calling a {kind} is not implemented yet — it arrives with task 8 (concurrency)"
+            "supervisor {name} is not callable — it starts by itself; use {name}.join() or {name}.stop()"
         )));
     }
     let mut candidates: Vec<&str> = BARE_ACTIONS.to_vec();
     candidates.extend(["page", "browser", "print", "sleep", "env", "emit", "exit"]);
-    let user: Vec<String> = rt.user_fn_names();
+    candidates.extend(CONCURRENCY);
+    let user: Vec<String> = rt.callable_names();
     candidates.extend(user.iter().map(String::as_str));
     let globals = vm.globals().names();
     candidates.extend(globals.iter().map(|s| &**s));

@@ -1,0 +1,22 @@
+# A task with retry + on_fail: shift_proxy() against two proxy stubs. Each
+# attempt reads /proxy-echo, which names the proxy that forwarded it: the
+# first attempt goes direct, the next two through proxy A and then B.
+# surf.test is not loopback, so Chrome does not bypass the proxy for it;
+# the host-resolver rule makes the direct attempt reach the fixture.
+browser:
+    proxies: [env("SURF_E2E_PROXY_A"), env("SURF_E2E_PROXY_B")]
+    flags: ["--host-resolver-rules=MAP surf.test 127.0.0.1"]
+
+base = env("SURF_E2E_PROXIED_BASE")
+seen = []
+
+task probe():
+    retry: 3
+    on_fail: shift_proxy()
+    goto("{base}/proxy-echo")
+    seen.push(text("body"))
+    if len(seen) < 3:
+        fail("try the next proxy")
+    return seen
+
+emit probe()

@@ -1,0 +1,16 @@
+# on element_appears keeps firing after the page is rebound (shift_proxy
+# moves it to a new target in a new context): the observer is installed
+# again on the new session.
+browser:
+    proxies: [env("SURF_E2E_PROXY_A")]
+
+on element_appears("#slow"):
+    print("appeared: {event.text()}")
+
+base = env("SURF_E2E_BASE")
+goto("{base}/slow?ms=1")
+sleep(300ms)
+print("shifted to {shift_proxy() == env("SURF_E2E_PROXY_A")}")
+goto("{base}/slow?ms=2")
+sleep(300ms)
+exit

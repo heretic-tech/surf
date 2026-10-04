@@ -117,19 +117,38 @@ something; link the PR / commit that picks it up.
 - [ ] surf-vm: `Op` is an enum of up to 16 bytes; if a profile ever shows
       dispatch cost, pack to u32 words. Not worth it for IO-bound scripts.
 
-## Runtime (step 7 deferrals)
-- [ ] `on navigation` / `on dialog` / `on request` / `on response` /
-      `on message` handlers are declared and stored but never fire (a
-      warning is printed). `element_appears` is the only live handler;
-      its observer task is per page and is **not** re-attached after
-      `Page::rebind` (the session changes) — task 8 must re-instrument on
-      restart / `shift_proxy()`.
-- [ ] `task` / `actor` / `supervisor` declarations are stored
-      (`Runtime::declarations`); calling or spawning one is a clear "arrives
-      with task 8" error, supervisors warn that they do not start.
-      `spawn`, `parallel for`, `shift_proxy()`, `send` / `broadcast` /
-      `receive` / `wait_for_message` likewise. `TaskCtx::spawned()` is the
-      hook for private pages.
+## Runtime (step 7 / 8 deferrals)
+- [ ] `on dialog` / `on request` / `on response` handlers are declared and
+      stored but never fire (a warning is printed) — task 9. `on dialog`
+      needs a `DialogPolicy::Defer` in surf-browser so the page's event
+      task stops auto-answering while a handler decides (`event.accept()`
+      / `event.dismiss()` → `Page.handleJavaScriptDialog`), with "accept
+      when the body returns without answering" as the fallback.
+- [ ] `h.cancel()` on a task that is itself waiting in a `parallel for`
+      cancels the items (drop guard), but a task's *spawned* children are
+      not cancelled with it (no parent/child tree beyond supervisors).
+      Decide whether `spawn` inside a task should be structured.
+- [ ] A joined task's error is a copy (`tasks::copy_error`): message, span,
+      selector and CDP method survive, the original is the cause, but
+      `is_no_browser` (CLI exit 3) only inspects the direct cause — a
+      "no Chrome" failure inside a spawned task exits 1, not 3.
+- [ ] Supervisor restarts rebind the child's page `SameContext` (cookies /
+      storage intact, tab at `about:blank`); if the rebind fails the child
+      gets a brand-new page. There is no per-child restart budget —
+      `max_restarts` counts every restart of every child in the window.
+- [ ] `broadcast` from the main body reaches every live task, including
+      supervised ones; from a supervised task it stays inside the tree.
+      There is no way to address a supervisor tree from outside it.
+- [ ] Private task pages take registry indices (`page.index` inside a task
+      is its private page's index); after the tasks end those indices are
+      closed, so `page(n)` with a small `n` from the main body may hit
+      `page(n) is closed`. Bare actions in the main body are unaffected
+      (private pages are ignored by the sole-page rule).
+- [ ] The proxy stub in `surf-testserver` maps every origin host to
+      loopback and speaks only enough HTTP/1.1 for the fixture (one request
+      per connection, `Connection: close`); `CONNECT` is tunnelled. Proxy
+      *authentication* (407) is still untested — see the surf-browser entry
+      above.
 - [ ] `surf repl`: top-level variables do not persist between lines (each
       chunk compiles to its own `<main>` whose locals die with it). Needs a
       VM hook for "top-level assignments become host globals" (or the REPL

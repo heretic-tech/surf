@@ -1,0 +1,18 @@
+# parallel for over 20 fixture URLs, at most 5 at a time, each item on its
+# own page; one JSON line per item (sorted afterwards so the output is
+# stable), then proof that every item had a distinct page.
+base = env("SURF_E2E_BASE")
+results = []
+
+parallel for i in 1..=20:
+    limit: 5
+    goto("{base}/slow?ms=50&i={i}")
+    results.push({i: i, slow: text("#slow"), page: page.index})
+
+results = results.sort(by: fn(r): r.i)
+pages = []
+for r in results:
+    emit {i: r.i, slow: r.slow}
+    if not pages.contains(r.page):
+        pages.push(r.page)
+print("items: {len(results)} distinct pages: {len(pages)}")

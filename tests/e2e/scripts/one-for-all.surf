@@ -1,0 +1,22 @@
+# one_for_all: when A fails, the still-running B is cancelled and both are
+# started again. No browser needed.
+runs = {a: 0, b: 0}
+
+actor A():
+    runs.a = runs.a + 1
+    if runs.a == 1:
+        sleep(50ms)
+        fail("a crashed")
+
+actor B():
+    runs.b = runs.b + 1
+    if runs.b == 1:
+        receive(timeout: 5s)
+
+supervisor Pair:
+    strategy: one_for_all
+    spawn A()
+    spawn B()
+
+Pair.join()
+emit runs

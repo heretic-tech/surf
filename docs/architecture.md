@@ -12,7 +12,7 @@ crates/
   surf-vm        AST → bytecode; single-threaded async stack VM; Value; Host trait; stdlib             [wasm32-clean]
   surf-cdp       Transport (pipe | websocket), \0 framing, Connection (id/session mux), Session, Event, typed Command codegen   [Send + Sync]
   surf-browser   Chrome discovery, quiet launch (exact flag list, crash watcher, shutdown ladder), Xvfb (display.rs), Browser, Page (rebindable backing), isolated World, selectors, auto-wait actions, input, network hooks, cookies, MutationObserver
-  surf-runtime   implements surf_vm::Host: lazy browser slots, implicit page resolution, bare actions, NativeObject wrappers, `on element_appears`, lifetime rule (spawn/parallel for/tasks/actors/supervisors: task 8)
+  surf-runtime   implements surf_vm::Host: lazy browser slots, implicit page resolution, bare actions, NativeObject wrappers, handlers (`element_appears`, `navigation`, `message`), tasks (`spawn`, `parallel for`, `task` props), actors + mailboxes, supervisors, `shift_proxy`, lifetime rule
   surf-cli       `surf run | check | doctor | repl | install` — tokio current_thread + LocalSet, exit codes, diagnostics rendering
   surf-testserver in-process axum fixture server (+ `fixtures/*.html`) shared by surf-browser's tests and the e2e suite; dev-dependency only
 protocol/        vendored browser_protocol.json + js_protocol.json (+ VERSION) for codegen
@@ -435,6 +435,8 @@ impl Browser {
     pub async fn close_page(&self, page: &Page) -> Result<(), BrowserError>;
     pub async fn create_backing(&self, context_id: Option<String>) -> Result<Backing, BrowserError>;
     pub async fn rebind_page(&self, page: &Page, proxy: Option<&str>, migration: Migration) -> Result<(), BrowserError>;
+    pub async fn rebind_page_to(&self, page: &Page, target: RebindTarget, migration: Migration) -> Result<(), BrowserError>; // SameContext | FreshContext | Proxy(url)
+    pub fn page_proxy(&self, page: &Page) -> Option<String>;                        // proxy of the page's private context
     pub async fn close(&self) -> Result<(), BrowserError>;                          // idempotent; attached browsers are never closed
 }
 
@@ -568,11 +570,17 @@ backing (event task, `Page` guard, proxy auth), installs the new one,
 imports cookies (`Storage.setCookies`), re-navigates to the URL and
 restores storage (origin-bound, so only together with the URL), then
 detaches and closes the old target. The handle, index and name are
-unchanged. `Browser::rebind_page(page, proxy, migration)` creates the
-target (in a new proxy context when asked) and disposes the old private
-context. One mechanism serves supervisor restarts, `shift_proxy()`, and
-later per-page Apostate personas (one process per persona; a logical
-`Browser` may own several OS processes).
+unchanged. `Browser::rebind_page_to(page, target, migration)` creates the
+target per `RebindTarget` — `SameContext` (new tab, same cookies /
+storage), `FreshContext` (a new empty context that keeps the page's proxy,
+if any), `Proxy(url)` (a new context behind that proxy, credentials
+re-installed) — and disposes the old private context; `rebind_page(page,
+proxy, migration)` is the old two-case wrapper. The browser remembers the
+proxy of every private context (`page_proxy`). Page indices never shift:
+`page(n)` for a closed index is `PageClosed`, not a new page. One
+mechanism serves `fresh: true` retries, `shift_proxy()`, supervisor
+restarts, and later per-page Apostate personas (one process per persona;
+a logical `Browser` may own several OS processes).
 
 **Measured quiet contract.** `crates/surf-browser/tests/pages.rs::quiet_contract_only_page_enable_is_sent`
 traces every frame of a full session (navigate, type, click, hover,
@@ -613,9 +621,11 @@ display exists, then `Browser::launch` (or `Browser::connect` for
 **Implicit resolution** (`pages.rs`). A bare action asks `Runtime::sole_page(action)`:
 the task context (a `tokio::task_local!` `TaskCtx`) wins when it has a
 page bound — a handler body is bound to the page its event fired on, a
-spawned task (task 8) gets a private page on its first bare action —
-otherwise the *default browser*'s `Browser::sole_page()` (page 1 is
-created on demand; several open → `BrowserError::Ambiguous` → `several
+spawned task / actor / `parallel for` item gets a **private page** on its
+first bare action (named `<task>#<id>`, `isolated: true` when the task is
+`fresh`, closed when the task ends, recorded in `Runtime::private_pages`)
+— otherwise the default browser's *shared* sole page: the open pages that
+are not some task's private page (0 → create; 1 → it; several → `several
 pages are open (1, 2, "login") — say which: page(2).click(…)`). The default
 browser is the unnamed block, the implicit one when nothing is declared, or
 the only named one; two named browsers and no unnamed block is `several
@@ -627,9 +637,11 @@ browsers are declared ("work", "home") — say which: work.goto(…)`.
 and named browsers (`BrowserObject`), and every bare action as a callable
 `BareAction` — they therefore shadow stdlib names of the same spelling
 (`type`); `type(v)` with one argument falls back to the stdlib function.
-`Host::call_global` handles what is left: `shift_proxy` / `send` /
-`broadcast` / `receive` and declared tasks / actors are clear "arrives with
-task 8" errors; anything else is `undefined function` with a suggestion.
+`self` (a `SelfObject` for the current task) and declared supervisors
+(`SupervisorObject`). `Host::call_global` handles what is left: a declared
+`task` called synchronously (`tasks::call_decl`), `shift_proxy`, `send` /
+`broadcast` / `receive` / `wait_for_message`; anything else is `undefined
+function` with a suggestion.
 All page methods live in one dispatcher (`methods.rs::page_method`) shared
 by bare actions, `page.…`, `page(n).…` and `browser.…`; elements
 (`all`, `first`, `wait`, the `event` of `on element_appears`) use
@@ -653,16 +665,87 @@ firing runs the body on a `spawn_local` task with a forked VM. Measured:
 `Runtime.bindingCalled` arrives without `Runtime.enable` through the whole
 stack (e2e `handler` script); no polling fallback was needed.
 
+The same observer task serves `on navigation(pattern)`: every main-frame
+`Page.frameNavigated` whose URL matches dispatches the body with `event =
+{url, page}`. A `frameNavigated` that arrives after the observer was
+installed in the already-committed document is recognised (the installed
+world still answers) and does not install a second observer. After a
+`Page::rebind` the old session's channels close (the old observer task
+ends) and `Runtime::after_rebind` installs a new one on the new session.
+
 **Additive surf-browser change (task 7):** `Element::from_handle(page, world,
 object_id, label)` — wrap a handle the runtime already holds.
+
+### surf-runtime concurrency (task 8)
+
+```rust
+pub struct TaskInfo { id, name, flavor: Fn|Task|Actor|Item, ctx: Rc<TaskCtx>, mailbox: Mailbox, message_handlers, group: Option<u64>, supervised, keep_page, … }
+pub fn spawn_task(rt, callee: Callee, args, name, flavor, page: Option<(Rc<Browser>, Page)>, supervising: Option<Rc<SupervisorRun>>) -> Rc<TaskInfo>;
+pub async fn run_decl(rt, decl: &Rc<TaskDecl>, args, vm) -> Result<Value, RuntimeError>;   // retry / on_fail / timeout / fresh
+pub struct SupervisorRun { id, name, strategy, max_restarts, within, children, restarts, … }  // starts from Host::declare
+task_local! { TASK_CTX: Rc<TaskCtx>; CURRENT_TASK: Rc<TaskInfo>; SUPERVISING: Rc<SupervisorRun> }
+```
+
+**Tasks** (`tasks.rs`). Every concurrent unit — `spawn f()`, `spawn
+task()`, `spawn Actor()`, each `parallel for` item — is a `TaskInfo` in
+`Runtime::tasks` run by `spawn_task` on its own `spawn_local` task with a
+**fresh `Vm`** (own `CancelToken`, shared `Globals`). The body is raced
+against the task's cancellation (`h.cancel()`, `fail_fast`, `one_for_all`)
+and the program's `exit_signal`; afterwards the private page is closed
+(unless a supervisor keeps it for a restart), the result is stored for
+`join()`, and an unjoined failure is rendered on stderr (exit code 1). A
+`task` / `actor` body goes through `run_decl` whether spawned or called:
+properties are resolved once (`Prop::resolve`; `on_fail` stays lazy), then
+up to `retry + 1` attempts each on a forked VM (so a `timeout:` can drop an
+attempt mid-await without corrupting the task's VM); between attempts
+`fresh` moves the current page to a `RebindTarget::FreshContext`, then
+`on_fail` runs. `shift_proxy()` is `Runtime::rebind(…,
+RebindTarget::Proxy(next), Migration { cookies: true, .. })` with a
+round-robin cursor on the `BrowserSlot`. `parallel for` spawns one `Item`
+task per element; `limit:` is a `tokio::sync::Semaphore` acquired inside
+the item before the body runs (so at most `limit` pages exist); the parent
+waits on all (`select_all` with `fail_fast`), aggregates failures into one
+error listing each item, and a drop guard cancels the items if the parent
+itself is cancelled.
+
+**Actors** (`actors.rs`). Every task owns a `Mailbox` (`VecDeque` +
+`Notify`). `send` / `broadcast` deep-copy the value per recipient and
+`deliver` it: into the mailbox, or straight to `on message:` handler tasks
+when the actor registered any (`Host::declare` sees the handler from inside
+the actor's task via `CURRENT_TASK`; queued messages are drained to it).
+`broadcast` is scoped to the sender's supervisor tree (`TaskInfo::group`)
+or the whole program. An actor with handlers stays alive after its body
+until cancelled.
+
+**Supervisors** (`supervisors.rs`). `Host::declare` creates a
+`SupervisorRun` and starts it at once (it first runs when the main body
+yields, i.e. after every declaration is in). The body runs under
+`SUPERVISING`; `tasks::spawn` registers the new task as a child
+(`parallel for` items of the body inherit the scope). The loop waits for
+any child (`select_all` on `TaskInfo::wait`), drops children that end
+normally or cancelled, and on an error prunes the restart window, gives up
+when `restarts >= max_restarts` (cancels every child, stores the error for
+`join()`), otherwise restarts per strategy: the failed child's page is
+rebound `SameContext` (new tab, cookies / storage intact) and handed to
+the new task through `TaskCtx::spawned_with`; `one_for_all` cancels and
+waits for the siblings first.
+
+**Measured (debug build, this Mac):** 50 concurrent pages (`parallel for`
+without a limit, each page loading a 100 ms fixture) complete in 3.1 s end
+to end including launch and shutdown
+(`surf-cli/tests/e2e.rs::fifty_concurrent_pages_under_thirty_seconds`);
+the e2e scripts `parallel-pool`, `supervised`, `scout-workers`,
+`shift-proxy`, `handler-rebind`, `spawn-join`, `concurrency-basics`,
+`supervisor-giveup`, `one-for-all` each run in ≈ 1 s.
 
 ### Lifetime rule
 
 A program stays alive while any handler block is registered or any task is
 running. When the main body returns and nothing is pending, browsers Surf
 launched are closed (temp profiles deleted, `profile:` dirs kept) and the
-process exits 0. `exit` / `exit(n)` cancels every task via `CancelToken`,
-closes everything, and exits with `n`. Attached browsers (`cdp: "ws://…"`,
+process exits 0. `exit` / `exit(n)` cancels the main body's VM via
+`CancelToken`, drops every spawned task at its `exit_signal` race, closes
+everything, and exits with `n`. Attached browsers (`cdp: "ws://…"`,
 `pool:`) are never closed.
 
 Implementation (`lifetime.rs`): counters for running tasks and installed

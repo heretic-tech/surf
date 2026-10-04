@@ -1,0 +1,26 @@
+# spawn / join / cancel / self; a spawned fn gets its own page, the main
+# body keeps the shared one.
+base = env("SURF_E2E_BASE")
+
+fn crawl(path):
+    goto("{base}/{path}")
+    return {title: title(), page: page.index, me: self.name}
+
+goto("{base}/")
+h = spawn crawl("forms.html")
+print("main page", page.index, "title", title())
+r = h.join()
+print("spawned page", r.page, "title", r.title, "self", r.me, "done", h.done)
+
+fn forever():
+    loop:
+        sleep(50ms)
+
+f = spawn forever()
+sleep(20ms)
+f.cancel()
+try:
+    f.join()
+catch e:
+    print("join after cancel:", e.message)
+print("pages open:", len(browser.pages()))

@@ -1,0 +1,67 @@
+# spawn / join, parallel for with limit, task retry, parallel error
+# aggregation, actors with receive / send / broadcast / on message, exit from
+# a handler. No browser is needed (no bare actions), so nothing launches.
+fn double(x):
+    sleep(10ms)
+    return x * 2
+
+h = spawn double(21)
+print("joined:", h.join(), "name", h.name, "done", h.done)
+
+results = []
+parallel for i in 1..=5:
+    limit: 2
+    sleep(5ms)
+    results.push(i * i)
+print(len(results), results.sort())
+
+n = 0
+task flaky(x):
+    retry: 3
+    fresh: false
+    n = n + 1
+    if n < 3:
+        fail("not yet {n}")
+    return "ok after {n} with {x}"
+print(flaky("arg"))
+
+try:
+    parallel for i in [1, 2, 3]:
+        if i == 2:
+            fail("bad {i}")
+catch e:
+    print("caught:", e.message)
+
+try:
+    parallel for i in [1, 2, 3]:
+        fail_fast: true
+        sleep(i * 20ms)
+        fail("item {i} failed")
+catch e:
+    print("caught:", e.message)
+
+actor Echo(tag):
+    loop:
+        m = receive(timeout: 500ms)
+        if m == nil:
+            return "done"
+        print("{tag} got {m.v} as {self.name}")
+
+e1 = spawn Echo("a")
+send(e1, {v: 1})
+send(e1.id, {v: 2})
+print(e1.join())
+
+actor Listener():
+    on message:
+        print("listener heard", event)
+        if event == "stop":
+            exit(0)
+
+l = spawn Listener()
+sleep(20ms)
+print("broadcast reached", broadcast("hello"))
+sleep(20ms)
+send(l, "stop")
+sleep(1s)
+print("unreachable")

@@ -6,7 +6,7 @@
 use crate::config::BrowserConfig;
 use crate::errors::convert;
 use crate::host::Runtime;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use surf_browser::Browser;
 use surf_vm::RuntimeError;
@@ -24,6 +24,8 @@ pub struct BrowserSlot {
     handle: RefCell<Option<Rc<Browser>>>,
     /// Serialises concurrent first uses so only one launch happens.
     launching: Mutex<()>,
+    /// `shift_proxy()` round-robin position.
+    proxy_cursor: Cell<usize>,
 }
 
 impl std::fmt::Debug for BrowserSlot {
@@ -43,7 +45,16 @@ impl BrowserSlot {
             config: RefCell::new(config),
             handle: RefCell::new(None),
             launching: Mutex::new(()),
+            proxy_cursor: Cell::new(0),
         })
+    }
+
+    /// The next `shift_proxy()` position (0, 1, 2, … — the caller takes
+    /// it modulo the list length).
+    pub fn next_proxy(&self) -> usize {
+        let i = self.proxy_cursor.get();
+        self.proxy_cursor.set(i + 1);
+        i
     }
 
     /// The launched browser, if any.

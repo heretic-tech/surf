@@ -103,6 +103,14 @@ personas (one process per persona; a logical `Browser` may own several OS
 processes). Rules out: exposing target ids to scripts, re-creating script
 values on restart.
 
+Exercised (step 8): `fresh: true` retries (`RebindTarget::FreshContext`),
+`shift_proxy()` (`RebindTarget::Proxy`), and supervisor restarts
+(`RebindTarget::SameContext`) all go through `Browser::rebind_page_to` and
+`Runtime::rebind`, which re-installs every handler observer on the new
+session — `tests/e2e/scripts/handler-rebind.surf` shows `on
+element_appears` firing before and after a `shift_proxy()` on the same
+`page` value.
+
 ## 11. Codegen typed CDP structs from vendored protocol JSON for an allow-list of domains; everything else via `call_raw`
 
 `protocol/browser_protocol.json` + `js_protocol.json` are vendored (pinned

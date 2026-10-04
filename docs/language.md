@@ -417,7 +417,11 @@ Rules:
   no-op with a warning.
 - `proxy:` sets a browser-level proxy; credentials are stripped from the
   flag and supplied via CDP auth. `proxies:` is the list `shift_proxy()`
-  rotates through.
+  rotates through: each call moves the **current page** (the task's
+  private page, or the main body's sole page) to a new, empty browser
+  context behind the next proxy of the list (round-robin, per browser),
+  keeps its cookies, leaves it on `about:blank` and returns the proxy URL.
+  Without a `proxies:` list it is an error.
 
 ---
 
@@ -449,11 +453,16 @@ creation order (1-based) plus optional names.
   page on its first method call. `page.index`, `page.name`, `page.open`
   are properties; `emit page` gives `{"index", "name", "url"}`.
 
-- `page.close()` closes a tab; indices of the remaining pages do not shift.
-- Inside a spawned task, an actor, a `parallel for` body, or a handler
-  body, the *first* bare action creates a page **private to that task** (so
-  concurrent tasks never fight over one tab). Explicit `page(n)` always
-  refers to the shared registry.
+- `page.close()` closes a tab; indices of the remaining pages do not shift
+  (`page(n)` for a closed index is an error, `page(n+1)` still auto-creates).
+- Inside a spawned task, an actor or a `parallel for` body, the *first*
+  bare action creates a page **private to that task** (so concurrent tasks
+  never fight over one tab), named `<task>#<id>` (`fetch#3`), in its own
+  browser context when the task is `fresh` (the default for `task` /
+  `actor`), and closed when the task ends. A handler body is bound to the
+  page its event fired on. Private pages never count for the main body's
+  sole-page rule — `spawn worker()` followed by `goto(…)` in the main body
+  still works. Explicit `page(n)` always refers to the shared registry.
 
 ```
 page(1).goto("https://example.com")
@@ -544,11 +553,18 @@ on response("*.json"):
   a page loads). `event` is the element (`event.text()`, `event.click()`,
   `event.selector`); bare actions inside the body act on the page the
   element appeared on. Observers survive navigation (they are installed
-  again in the new document).
-- `navigation`, `dialog`, `request`, `response` and `message` handlers are
-  accepted but do not fire yet (a warning is printed; tasks 8 / 9).
+  again in the new document) and page moves (`fresh: true` retries,
+  `shift_proxy()`, supervisor restarts re-install them on the new target).
+- `navigation(pattern)` fires on every committed main-frame navigation
+  whose URL matches the pattern (`*` glob, or `re:…`; no pattern matches
+  everything). `event` is a map `{url, page}`; bare actions in the body act
+  on that page.
+- `dialog`, `request` and `response` handlers are accepted but do not fire
+  yet (a warning is printed; task 9).
 - `on message:` inside an actor body receives each mailbox message as
-  `event` (alternative to calling `receive()` in a loop).
+  `event` (alternative to calling `receive()` in a loop). An actor with an
+  `on message:` handler stays alive after its body returns (its mailbox
+  keeps receiving) until it is cancelled, the supervisor stops, or `exit`.
 
 ### 6.1 Program lifetime
 
@@ -559,7 +575,9 @@ inside a handler body), as does Ctrl-C (exit code 130). "Registered" means
 installed on a page: a script that declares a handler but never opens a
 page exits when its main body ends. A handler body that raises an
 uncaught error is reported on stderr, the program keeps running, and the
-final exit code is 1.
+final exit code is 1; the same goes for a spawned task nobody `join()`s
+and for a supervisor that gives up (a joined task hands its error to the
+joiner instead).
 
 ---
 
@@ -578,13 +596,20 @@ h = spawn crawl("https://example.com")
 print(h.join())      # waits; re-raises the task's error
 ```
 
-`spawn <callee>(<args>)` runs a `fn`, `task` or `actor` concurrently and
-returns a handle (`join()`, `id`, `cancel()`). A spawned callee that uses
-bare actions gets its own page. `spawn` is an **expression**: it takes the
-whole postfix chain that follows it (`spawn work.fetch(1)` spawns the
-method call), so it can stand alone as a statement, be assigned, or be
-placed in a list (`[spawn a(), spawn b()]`). To call a method on the
-handle in the same expression, parenthesise: `(spawn f()).join()`.
+`spawn <callee>(<args>)` runs a `fn`, `task` or `actor` concurrently on
+its own task (own VM, shared globals) and returns a handle: `h.join()`
+waits and returns the body's value or re-raises its error, `h.cancel()`
+stops it (a pending action is abandoned, its private page closed; a later
+`join()` raises a catchable `cancelled` error), `h.send(msg)` posts to its
+mailbox; `h.id`, `h.name`, `h.done`, `h.cancelled` are properties. A
+spawned callee that uses bare actions gets its own page (§ 5). Builtins
+cannot be spawned directly — wrap them in a `fn`. `spawn` is an
+**expression**: it takes the whole postfix chain that follows it
+(`spawn work.fetch(1)` spawns the method call), so it can stand alone as a
+statement, be assigned, or be placed in a list (`[spawn a(), spawn b()]`).
+To call a method on the handle in the same expression, parenthesise:
+`(spawn f()).join()`. Inside a task body `self.id` / `self.name` identify
+it (§ 7.4).
 
 ### 7.2 `parallel for`
 
@@ -596,13 +621,23 @@ parallel for url in urls:
     emit {url: url, title: title()}
 ```
 
-Runs the body once per item, concurrently, at most `limit` at a time
-(default: unlimited). Leading `key: value` lines are options (`limit`,
-`fail_fast`); after the first statement they are a syntax error. The
-statement completes when all items have finished. With `fail_fast: true`
-(default `false`) the first error cancels the rest and is re-raised; with
-`false` the errors are collected and raised together at the end. Each body
-invocation gets its own page.
+Runs the body once per item (lists, ranges, maps → keys, strings →
+characters), concurrently, at most `limit` at a time (default: unlimited).
+Leading `key: value` lines are options (`limit`, `fail_fast`); after the
+first statement they are a syntax error. The statement completes when all
+items have finished. With `fail_fast: true` (default `false`) the first
+error cancels the rest and is re-raised as `parallel for: item 3 ("…")
+failed, the rest were cancelled: <message>`; with `false` the errors are
+collected and raised together at the end as one error:
+
+```
+parallel for: 2 of 20 items failed
+  item 3 ("https://…"): goto: net::ERR_CONNECTION_REFUSED
+  item 7 ("https://…"): click: timed out after 30.0s (selector: #go)
+```
+
+Each body invocation gets its own page (closed when the item finishes).
+An `exit` inside an item ends the program.
 
 ### 7.3 `task`
 
@@ -621,14 +656,20 @@ properties; after the first statement they are a syntax error
 (properties-before-statements rule). Unknown or duplicate property keys
 are a syntax error.
 
-| property | meaning |
-|----------|---------|
-| `retry: N` | re-run the body up to N more times on error |
-| `on_fail: expr` | evaluated **lazily**, once per failure, before the retry (`shift_proxy()`) |
-| `timeout: d` | whole-body timeout per attempt |
-| `fresh: true` | run each attempt in a fresh browser context (new cookies/storage) |
+| property | default | meaning |
+|----------|---------|---------|
+| `retry: N` | `0` | re-run the body up to N more times on a (catchable) error |
+| `on_fail: expr` | — | evaluated **lazily**, once per failure, before the retry (`shift_proxy()`); its own error ends the task |
+| `timeout: d` | none | per-attempt deadline for the whole body (`task fetch: attempt 2 timed out after 60s`) |
+| `fresh: bool` | `true` | a spawned task's private page starts in its own browser context; between attempts the current page is moved to a new, empty context (cookies and storage gone, its proxy kept) |
 
-Tasks are called like functions (`fetch(u)`) or spawned (`spawn fetch(u)`).
+Attempts run in order: body → (on error) `fresh` move → `on_fail` → body
+…; after the last attempt the error is re-raised with ` (task fetch: gave
+up after 4 attempts)` appended. `exit` and cancellation are never retried.
+
+Tasks are called like functions (`fetch(u)` — runs in the caller's task, on
+the caller's page, with the properties applied) or spawned (`spawn
+fetch(u)`). Actors must be spawned.
 
 ### 7.4 Actors
 
@@ -645,14 +686,20 @@ actor Worker(n):
     emit {worker: n, id: self.id}
 ```
 
-An actor runs with its own page and a mailbox. Inside an actor body:
-`self.id` (int), `receive()` / `wait_for_message()` (block until a message;
-`receive(timeout: d)` returns `nil` on timeout), `on message:` handler
-form. Anywhere: `send(ref, msg)` (ref = spawn handle or id),
-`broadcast(msg)` (every live actor except the sender). Messages are values
-(deep-copied if mutable). An actor ends when its body returns. An actor
-body takes the same leading properties as a task (`retry`, `on_fail`,
-`timeout`, `fresh`), applied to each run of the body.
+An actor runs with its own page and a mailbox. Inside an actor body (or
+any spawned task): `self.id` (int), `self.name`, `self.pending` (queued
+messages); `receive()` / `wait_for_message()` block until a message
+arrives (`receive(timeout: d)` returns `nil` on timeout); `on message:`
+is the handler form (§ 6). Anywhere: `send(ref, msg)` (ref = the spawn
+handle or its `id`; an error if no such live task), `broadcast(msg)`
+(every live task in the sender's supervisor tree — or in the whole program
+when the sender is not supervised or is the main body — except the sender;
+returns the recipient count). Messages are values, deep-copied per
+recipient (lists and maps copied, native handles shared). An actor ends
+when its body returns (unless it has `on message:` handlers, § 6); its
+return value is what `join()` gives. An actor body takes the same leading
+properties as a task (`retry`, `on_fail`, `timeout`, `fresh`), applied to
+each run of the body.
 
 ### 7.5 Supervisors
 
@@ -668,13 +715,24 @@ supervisor Crew:
 
 The body may contain only `spawn …` lines and `parallel for … :` whose body
 is `spawn …` lines (anything else is a syntax error; `supervisor` takes no
-parameter list). A child that errors is restarted (`one_for_one`: just
-it; `one_for_all`: every child) on a fresh page with cookies/storage
-migrated. More than `max_restarts` restarts within `within` → the
-supervisor fails and the error propagates. `supervisor` declarations are
-hoisted and **start automatically** once all declarations are registered,
-before the first statement runs (so the example above needs no start call).
-`Crew.stop()` cancels its children; `Crew.join()` waits for all of them.
+parameter list). Every task spawned there is a **child**. Defaults:
+`strategy: one_for_one`, `max_restarts: 3`, `within: 60s`. A child whose
+body ends normally (or is cancelled) leaves the tree. A child that errors
+is restarted — `one_for_one`: just it; `one_for_all`: the others are
+cancelled and every child is started again — with its original arguments
+and its page moved to a new target in the **same** browser context
+(cookies and storage survive, the tab is at `about:blank`); a line on
+stderr names the child and the error. Child errors are not otherwise
+reported. More than `max_restarts` restarts within `within` fail the
+supervisor: the children are cancelled and the error names the child and
+its last error (`supervisor Crew: actor Worker#4 failed 4 times within
+60s (max_restarts: 3) — giving up; last error: …`). `supervisor`
+declarations are hoisted and **start automatically** once all
+declarations are registered, before the first statement runs (so the
+example above needs no start call); the supervisor finishes when its last
+child has. `Crew.join()` waits for that and re-raises the give-up error;
+`Crew.stop()` cancels the children; `Crew.children`, `Crew.restarts`,
+`Crew.done` are properties.
 
 ---
 
