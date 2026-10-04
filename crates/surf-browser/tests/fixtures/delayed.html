@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Delayed fixture</title></head>
+<body>
+  <h1>Delayed</h1>
+  <div id="host"></div>
+  <button id="later" disabled onclick="document.getElementById('result').textContent='clicked'">enable me</button>
+  <div id="result"></div>
+  <div id="spinner" style="position:fixed;left:0;top:0;width:100%;height:100%;background:rgba(0,0,0,.3)">loading</div>
+  <div id="mover" style="position:absolute;left:0;top:300px;width:80px;height:30px;background:#9cf" onclick="document.getElementById('result').textContent='moved-click'">move</div>
+  <div id="gone">goes away</div>
+  <div id="counter">0</div>
+  <script>
+    setTimeout(() => {
+      const el = document.createElement('div');
+      el.id = 'appeared';
+      el.textContent = 'I appeared';
+      document.getElementById('host').appendChild(el);
+    }, 800);
+    setTimeout(() => { document.getElementById('later').disabled = false; }, 800);
+    setTimeout(() => { document.getElementById('spinner').remove(); }, 600);
+    setTimeout(() => { document.getElementById('gone').remove(); }, 700);
+    let n = 0;
+    const timer = setInterval(() => {
+      n++;
+      document.getElementById('counter').textContent = String(n);
+      if (n >= 5) clearInterval(timer);
+    }, 150);
+    const mover = document.getElementById('mover');
+    let x = 0;
+    const anim = setInterval(() => {
+      x += 20;
+      mover.style.left = x + 'px';
+      if (x >= 200) clearInterval(anim);
+    }, 40);
+  </script>
+</body>
+</html>

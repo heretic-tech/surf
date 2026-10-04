@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Text fixture</title>
+<style>.x { display:inline-block }</style>
+<script>var notText = "Buy now";</script>
+</head>
+<body>
+  <nav><a id="nav-buy" href="#">Buy now and save</a></nav>
+  <div id="card">
+    <p id="desc">Why not buy now? It is cheap.</p>
+    <button id="buy"><span>Buy now</span></button>
+    <button id="buy-upper">BUY NOW</button>
+    <button id="cart" onclick="document.getElementById('out').textContent='added'">Add to cart</button>
+  </div>
+  <ul id="list">
+    <li>alpha</li>
+    <li>beta</li>
+    <li>gamma</li>
+  </ul>
+  <div id="out"></div>
+</body>
+</html>

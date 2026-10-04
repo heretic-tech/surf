@@ -1,0 +1,10 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Dialog fixture</title></head>
+<body>
+  <button id="alert" onclick="alert('hello'); document.getElementById('result').textContent = 'alerted'">alert</button>
+  <button id="confirm" onclick="document.getElementById('result').textContent = confirm('sure?') ? 'yes' : 'no'">confirm</button>
+  <button id="prompt" onclick="document.getElementById('result').textContent = 'said:' + prompt('name?', 'dflt')">prompt</button>
+  <div id="result"></div>
+</body>
+</html>

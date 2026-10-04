@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Forms fixture</title></head>
+<body>
+  <h1>Forms</h1>
+  <form id="login" onsubmit="event.preventDefault(); document.getElementById('submitted').textContent = 'submitted:' + document.getElementById('username').value;">
+    <input id="username" name="username" type="text" placeholder="user">
+    <input id="password" name="password" type="password">
+    <textarea id="notes">old notes</textarea>
+    <label><input id="agree" type="checkbox"> agree</label>
+    <input id="r1" type="radio" name="r" value="one">
+    <input id="r2" type="radio" name="r" value="two">
+    <select id="color">
+      <option value="">pick</option>
+      <option value="red">Red</option>
+      <option value="green">Green</option>
+      <option value="blue">Blue</option>
+    </select>
+    <select id="multi" multiple>
+      <option value="a">A</option>
+      <option value="b">B</option>
+      <option value="c">C</option>
+    </select>
+    <button id="submit" type="submit">Log in</button>
+  </form>
+  <div id="submitted"></div>
+  <div id="keys"></div>
+  <div id="hovered">not hovered</div>
+  <div id="hoverme" style="width:100px;height:30px;background:#ccc" onmouseenter="document.getElementById('hovered').textContent='hovered'">hover</div>
+  <div id="clicks">0</div>
+  <button id="counter" onclick="document.getElementById('clicks').textContent = String(Number(document.getElementById('clicks').textContent) + 1)">count</button>
+  <button id="dbl" ondblclick="document.getElementById('clicks').textContent = 'double'">dbl</button>
+  <div id="editable" contenteditable="true">edit me</div>
+  <a id="link" href="/nav.html" data-kind="internal" title="Go">go to nav</a>
+  <p id="para">  Hello <b>world</b>  </p>
+  <div id="hidden" style="display:none">hidden text</div>
+  <script>
+    const u = document.getElementById('username');
+    u.addEventListener('keydown', (e) => {
+      document.getElementById('keys').textContent += e.key + (e.ctrlKey ? '(ctrl)' : '') + (e.shiftKey ? '(shift)' : '') + ';';
+    });
+    u.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('submitted').textContent = 'enter'; } });
+  </script>
+</body>
+</html>
