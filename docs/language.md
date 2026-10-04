@@ -14,6 +14,110 @@ page.goto("https://example.com")
 print(title())
 ```
 
+Every construct below is exercised by a script you can run:
+[`examples/`](../examples/) against the public web, or
+[`tests/e2e/scripts/`](../tests/e2e/scripts/) against the fixture server
+(`cargo test -p surf-cli --test e2e`; each `<name>.surf` has its expected
+`<name>.out` next to it). Sections link to the script that shows them.
+
+---
+
+## 0. Cheatsheet
+
+One line per thing. `sel` is a selector (§ 5.1); every selector action
+auto-waits and takes `timeout:`.
+
+```
+# run                         surf run file.surf   |  surf check file.surf  |  surf doctor  |  surf repl
+browser:                      # optional config block, nothing launches until the first action (§ 4)
+    headless: true            # path: cdp: pool: proxy: proxies: virtual: size: profile: flags: timeout: downloads:
+browser work:                 # a second, named browser: work.goto(…), work.page(2).click(…)
+
+# navigation
+goto(url)                     # wait_until: "load" | "domcontentloaded" | "networkidle"
+back()  forward()  reload()   # back()/forward() return whether they moved
+wait_navigation()             # the next main-frame navigation after a click/press
+url()  title()
+
+# input
+click(sel)                    # button: "left"  count: 2 ; dblclick(sel) right_click(sel)
+type(sel, text)               # key by key; delay: 50ms
+fill(sel, text)               # select-all + insert
+press("Enter")  press(sel, "Control+a")
+hover(sel)  focus(sel)  check(sel)  uncheck(sel)
+select(sel, value)            # or a list of values; by value, label or text
+scroll(sel)  scroll(x, y)  scroll_to(x, y)
+
+# reading
+text(sel)  html(sel)  value(sel)  attr(sel, name)
+exists(sel)  count(sel)       # no wait
+all(sel)  first(sel)          # elements: e.text() e.attr(n) e.click() e.type(t) e.all(sel) …
+eval("document.title")        # isolated world, JSON back; eval(fn(a): a + 1, 41)
+screenshot(path, full: true)  pdf(path)
+
+# waiting
+wait(sel)  wait_gone(sel)  wait_text(sel, t)  wait_url("*/done*")  wait(2s)  sleep(500ms)
+
+# state
+cookies()  set_cookie(name, value)  set_cookies([…])  clear_cookies()
+export_cookies(path)  import_cookies(path)
+local_storage()  set_local_storage({k: v})  clear_local_storage()
+viewport(w, h)  on_dialog("accept" | "dismiss" | text)  dialogs()
+block(["*.png", "*/ads/*"])  block([])
+wait_download()               # needs downloads: in browser:
+
+# pages
+page  page(2)  page("login")  page.close()  page.index  page.name
+browser.new_page(proxy: url, name: "x")  browser.pages()  browser.cookies()  browser.close()
+shift_proxy()                 # next of proxies:, page moved, cookies kept
+
+# language
+x = 1  s = "a {x} b"  d = 2s  xs = [1, 2]  m = {a: 1}  r = 1..=3
+if c:  elif c:  else:         for x in xs:   while c:   loop:   break   continue
+fn f(a, b: 2):  return v      g = fn(x): x * 2
+try:  …  catch e:  e.message  # fail("msg") raises
+print(a, b)  emit {k: v}      # emit = one JSON line
+exit  exit(1)
+
+# events (hoisted; the body runs on its own task, payload is `event`)
+on element_appears(sel):      on navigation("*/login*"):      on dialog:
+on request("*/api/*"):        on response("*.json"):           intercept("*/api/x"):
+
+# concurrency
+h = spawn f(1)  h.join()  h.cancel()  h.send(msg)
+parallel for u in urls:       # limit: 4   fail_fast: true
+task fetch(u):                # retry: 3  on_fail: shift_proxy()  timeout: 60s  fresh: true
+actor Worker(n):              # receive()  receive(timeout: 5s)  send(ref, m)  broadcast(m)  self.id   on message:
+supervisor Crew:              # strategy: one_for_one | one_for_all  max_restarts: 3  within: 60s ; spawn … lines
+```
+
+Where to see each group run: navigation →
+[`navigation.surf`](../tests/e2e/scripts/navigation.surf); input and
+reading → [`forms.surf`](../tests/e2e/scripts/forms.surf),
+[`eval.surf`](../tests/e2e/scripts/eval.surf),
+[`eval-args.surf`](../tests/e2e/scripts/eval-args.surf),
+[`screenshot.surf`](../tests/e2e/scripts/screenshot.surf); waiting →
+[`waits.surf`](../tests/e2e/scripts/waits.surf); state →
+[`cookies.surf`](../tests/e2e/scripts/cookies.surf),
+[`local-storage.surf`](../tests/e2e/scripts/local-storage.surf),
+[`dialog-policy.surf`](../tests/e2e/scripts/dialog-policy.surf),
+[`block.surf`](../tests/e2e/scripts/block.surf),
+[`download.surf`](../tests/e2e/scripts/download.surf); pages →
+[`examples/two-tabs.surf`](../examples/two-tabs.surf),
+[`implicit-page.surf`](../tests/e2e/scripts/implicit-page.surf),
+[`proxy-auth-page.surf`](../tests/e2e/scripts/proxy-auth-page.surf);
+language → [`concurrency-basics.surf`](../tests/e2e/scripts/concurrency-basics.surf)
+(no browser needed); events →
+[`handler.surf`](../tests/e2e/scripts/handler.surf),
+[`dialogs.surf`](../tests/e2e/scripts/dialogs.surf),
+[`hooks.surf`](../tests/e2e/scripts/hooks.surf),
+[`intercept.surf`](../tests/e2e/scripts/intercept.surf); concurrency →
+[`spawn-join.surf`](../tests/e2e/scripts/spawn-join.surf),
+[`examples/parallel-pool.surf`](../examples/parallel-pool.surf),
+[`shift-proxy.surf`](../tests/e2e/scripts/shift-proxy.surf),
+[`scout-workers.surf`](../tests/e2e/scripts/scout-workers.surf),
+[`examples/supervised.surf`](../examples/supervised.surf).
+
 ---
 
 ## 1. Lexical structure
@@ -321,7 +425,12 @@ catch e:
 `catch` is required; the binding is optional (`catch:`). The caught value is
 an error map with `message`, `selector` (or nil), `cdp_method` (or nil),
 `line`. Errors are values; there is no `throw` — call `fail("message")` to
-raise one. `exit` is not catchable.
+raise one. `exit` is not catchable. Runnable:
+[`concurrency-basics.surf`](../tests/e2e/scripts/concurrency-basics.surf)
+(`fail` + `retry`), [`block.surf`](../tests/e2e/scripts/block.surf)
+(catching a runtime error's `message`), and the uncaught case in
+[`timeout-error.surf`](../tests/e2e/scripts/timeout-error.surf) with its
+expected `.err` / `.code`.
 
 ### 3.8 `print`
 
@@ -363,6 +472,11 @@ and exits the process with the code. Not catchable.
 A config block is declarative. It is read before anything runs and
 **nothing launches until the first action that needs a page**. It may appear
 only at the top level and is conventionally at the top of the file.
+Runnable: [`examples/login.surf`](../examples/login.surf) (`virtual:`),
+[`examples/parallel-pool.surf`](../examples/parallel-pool.surf)
+(`headless:`, `timeout:`), [`shift-proxy.surf`](../tests/e2e/scripts/shift-proxy.surf)
+(`proxies:`, `flags:`), [`download.surf`](../tests/e2e/scripts/download.surf)
+(`downloads:`).
 
 ```
 browser:
@@ -477,6 +591,15 @@ page(2).goto("https://example.org")
 page(1).type("input", "surf")
 ```
 
+Runnable: [`examples/two-tabs.surf`](../examples/two-tabs.surf),
+[`implicit-page.surf`](../tests/e2e/scripts/implicit-page.surf) (bare
+actions, `page.…` and `browser.…` all mean the sole page),
+[`ambiguity.surf`](../tests/e2e/scripts/ambiguity.surf) and
+[`ambiguity-error.surf`](../tests/e2e/scripts/ambiguity-error.surf) (the
+`several pages are open` error, with its expected `.err`),
+[`proxy-auth-page.surf`](../tests/e2e/scripts/proxy-auth-page.surf)
+(`browser.new_page(proxy:, name:)`).
+
 ### 5.1 Selectors
 
 CSS is the default. Prefixes: `text=Buy now` (visible text, trimmed,
@@ -491,7 +614,7 @@ attached, visible, stable (not animating) and enabled, up to `timeout`
 | action | returns | notes |
 |--------|---------|-------|
 | `goto(url, wait_until: "load")` | nil | `"load"`, `"domcontentloaded"`, `"networkidle"` |
-| `click(sel, button: "left", count: 1)` | nil | real mouse events at element centre |
+| `click(sel, button: "left", count: 1)` | nil | real mouse events at element centre; `dblclick(sel)`, `right_click(sel)` are shorthands |
 | `type(sel, text, delay: 0ms)` | nil | key-by-key |
 | `fill(sel, text)` | nil | select-all + insert |
 | `press(key)` / `press(sel, key)` | nil | `"Enter"`, `"Control+a"` |
@@ -520,6 +643,22 @@ attached, visible, stable (not animating) and enabled, up to `timeout`
 Every selector action takes `timeout:`; `type` also takes `delay:`.
 Unknown keywords are an error naming the keyword. Durations are accepted
 wherever a timeout is (`timeout: 5s`).
+
+Runnable, by row: [`forms.surf`](../tests/e2e/scripts/forms.surf) (type,
+fill, press, check, select, all, text, attr, value, count, exists, hover,
+dblclick), [`waits.surf`](../tests/e2e/scripts/waits.surf) (wait,
+wait_gone, wait_text, wait_url, timeouts),
+[`navigation.surf`](../tests/e2e/scripts/navigation.surf) (goto, back,
+forward, reload, wait_navigation, a 302 chain),
+[`eval.surf`](../tests/e2e/scripts/eval.surf) and
+[`eval-args.surf`](../tests/e2e/scripts/eval-args.surf),
+[`screenshot.surf`](../tests/e2e/scripts/screenshot.surf),
+[`cookies.surf`](../tests/e2e/scripts/cookies.surf) (cookies, set_cookie,
+export / import, clear), [`local-storage.surf`](../tests/e2e/scripts/local-storage.surf),
+[`block.surf`](../tests/e2e/scripts/block.surf),
+[`download.surf`](../tests/e2e/scripts/download.surf),
+[`dialog-policy.surf`](../tests/e2e/scripts/dialog-policy.surf)
+(on_dialog, dialogs).
 
 `eval(fn(): document.cookie)` — a zero-arg lambda whose body is translated
 to JavaScript source text verbatim (the lambda body is **not** Surf; it is
@@ -625,6 +764,19 @@ intercept("*/api/items"):
   `on message:` handler stays alive after its body returns (its mailbox
   keeps receiving) until it is cancelled, the supervisor stops, or `exit`.
 
+Runnable: [`handler.surf`](../tests/e2e/scripts/handler.surf)
+(`element_appears`, `exit` from a handler),
+[`handler-rebind.surf`](../tests/e2e/scripts/handler-rebind.surf) (the
+observer survives `shift_proxy()`),
+[`navigation.surf`](../tests/e2e/scripts/navigation.surf) (`on navigation`),
+[`dialogs.surf`](../tests/e2e/scripts/dialogs.surf) (`on dialog`),
+[`hooks.surf`](../tests/e2e/scripts/hooks.surf) (`on request` / `on
+response` with `body()` / `json()`),
+[`intercept.surf`](../tests/e2e/scripts/intercept.surf) (fulfil, fail,
+rewrite, add a header),
+[`concurrency-basics.surf`](../tests/e2e/scripts/concurrency-basics.surf)
+(`on message:` inside an actor).
+
 ### 6.1 Program lifetime
 
 A program stays alive while any handler is registered or any task is
@@ -668,7 +820,8 @@ cannot be spawned directly — wrap them in a `fn`. `spawn` is an
 statement, be assigned, or be placed in a list (`[spawn a(), spawn b()]`).
 To call a method on the handle in the same expression, parenthesise:
 `(spawn f()).join()`. Inside a task body `self.id` / `self.name` identify
-it (§ 7.4).
+it (§ 7.4). Runnable: [`spawn-join.surf`](../tests/e2e/scripts/spawn-join.surf)
+(join, cancel, `self`, a spawned fn's private page).
 
 ### 7.2 `parallel for`
 
@@ -696,7 +849,12 @@ parallel for: 2 of 20 items failed
 ```
 
 Each body invocation gets its own page (closed when the item finishes).
-An `exit` inside an item ends the program.
+An `exit` inside an item ends the program. Runnable:
+[`examples/parallel-pool.surf`](../examples/parallel-pool.surf),
+[`parallel-pool.surf`](../tests/e2e/scripts/parallel-pool.surf) (20 items,
+`limit: 5`, proof of distinct pages),
+[`concurrency-basics.surf`](../tests/e2e/scripts/concurrency-basics.surf)
+(error aggregation).
 
 ### 7.3 `task`
 
@@ -728,7 +886,12 @@ up after 4 attempts)` appended. `exit` and cancellation are never retried.
 
 Tasks are called like functions (`fetch(u)` — runs in the caller's task, on
 the caller's page, with the properties applied) or spawned (`spawn
-fetch(u)`). Actors must be spawned.
+fetch(u)`). Actors must be spawned. Runnable:
+[`shift-proxy.surf`](../tests/e2e/scripts/shift-proxy.surf) (`retry` +
+`on_fail: shift_proxy()` across two proxies),
+[`examples/parallel-pool.surf`](../examples/parallel-pool.surf) (`retry`,
+`timeout`), [`concurrency-basics.surf`](../tests/e2e/scripts/concurrency-basics.surf)
+(`fresh: false`).
 
 ### 7.4 Actors
 
@@ -758,7 +921,10 @@ recipient (lists and maps copied, native handles shared). An actor ends
 when its body returns (unless it has `on message:` handlers, § 6); its
 return value is what `join()` gives. An actor body takes the same leading
 properties as a task (`retry`, `on_fail`, `timeout`, `fresh`), applied to
-each run of the body.
+each run of the body. Runnable:
+[`scout-workers.surf`](../tests/e2e/scripts/scout-workers.surf) (a Scout
+broadcasts, five Workers receive, a Collector orders the output),
+[`examples/supervised.surf`](../examples/supervised.surf).
 
 ### 7.5 Supervisors
 
@@ -791,7 +957,12 @@ declarations are registered, before the first statement runs (so the
 example above needs no start call); the supervisor finishes when its last
 child has. `Crew.join()` waits for that and re-raises the give-up error;
 `Crew.stop()` cancels the children; `Crew.children`, `Crew.restarts`,
-`Crew.done` are properties.
+`Crew.done` are properties. Runnable:
+[`examples/supervised.surf`](../examples/supervised.surf),
+[`supervised.surf`](../tests/e2e/scripts/supervised.surf) (a Worker that
+crashes once and is restarted with its cookies intact),
+[`supervisor-giveup.surf`](../tests/e2e/scripts/supervisor-giveup.surf)
+(`max_restarts` exceeded), [`one-for-all.surf`](../tests/e2e/scripts/one-for-all.surf).
 
 ---
 
@@ -931,6 +1102,9 @@ Exit codes: `0` ok, `1` runtime error, `2` syntax error, `3` no browser
 found (discovery failed, or `browser.path` / `SURF_CHROME` is not a
 binary), `130` interrupted (Ctrl-C), or whatever `exit(n)` said. When the
 browser crashes the message ends with the last lines of its stderr.
+Runnable: [`timeout-error.surf`](../tests/e2e/scripts/timeout-error.surf)
+and [`ambiguity-error.surf`](../tests/e2e/scripts/ambiguity-error.surf)
+(each with the expected stderr in `.err` and exit code in `.code`).
 
 ## 11. Command line
 
