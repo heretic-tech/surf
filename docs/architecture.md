@@ -154,7 +154,8 @@ Every box is a `TaskInfo` run by `spawn_task` on the one `LocalSet`
 ## Roadmap seams
 
 Three extensions are designed in but not built; each has a seam in the
-current code and a TASKS.md entry.
+current code and a TASKS.md entry (v0.3 for the engine and personas,
+v0.5 for the wasm build).
 
 ```mermaid
 flowchart LR
@@ -174,9 +175,17 @@ flowchart LR
   key and raises *not yet* at first use; the launcher is one more
   `LaunchOptions::resolve` branch (discovery path + the same flag policy).
   Core crates never depend on it.
-* **Per-page personas** (Decisions 7, 10). A persona is a process; a
+* **Per-page personas** (Decisions 7, 10, 13, 14). A persona is a process; a
   `Browser` that owns several `Launched` processes hands `Page::rebind` a
   `Backing` from the right one. Nothing above `surf-browser` changes.
+  The process is chosen by a `ProcessKey = (engine, ResolvedPersona)` —
+  the persona after geoip has filled in locale and timezone — so two pages
+  with the same seed behind proxies exiting in different timezones land in
+  different processes, and `max_processes` caps the slots (slot 0 is the
+  `browser:` persona; a slot with zero pages is retired when a new key
+  needs one). `Page::rebind_to(ProcessKey, Migration)` is the one path for
+  `set_persona` / `set_proxy` / `shift_*()` and supervisor restarts, so the
+  post-rebind handler re-install already in `Runtime::rebind` covers them.
 * **`pool:` / wasm** (Decision 8). `pool:` already routes through
   `Browser::connect`; a wasm build swaps `surf-cli` + the pipe transport
   for a websocket-only runtime. `surf-syntax` and `surf-vm` are built for

@@ -153,3 +153,110 @@ not launch (`cdp: "ws://…"`, `pool:`). Still forbidden:
 launches without the switch and asserts `true`, so the reason cannot be
 "cleaned up" away. Supersedes the "never
 `--disable-blink-features=AutomationControlled`" wording in rule 2.
+
+## 13. Persona language and process-per-persona key
+
+Apostate's persona is the browser **process's** compositor: one persona
+per OS process, none per browser context. So a persona is a process
+(Decision 7) and the seam is `Page::rebind` (Decision 10). Settled before
+any code so that the parser, the browser crate and the runtime build to
+one spec (v0.3). The language:
+
+```
+browser:
+    engine: apostate          # chrome (default) | apostate
+    persona: 42               # seed shorthand
+    persona: "windows"        # platform shorthand (apostate draws the seed)
+    persona:                  # full form
+        seed: 42              # int, or "host" (then no other key is allowed)
+        platform: windows     # windows | macos | linux
+        locale: "en-US"       # optional; else geoip (when a proxy is set) else host
+        timezone: "Europe/Berlin"
+        screen: "1920x1080"   # optional; never derived from size:
+    personas: [42, {seed: 7, platform: macos}]   # rotation list for shift_persona()
+    geoip: true               # default true iff a proxy is configured and engine is apostate
+    max_processes: 8          # process-per-persona cap
+p = browser.new_page(persona: {seed: 7, platform: "macos"}, proxy: "http://…")
+page.set_persona(seed: 9)     # hot-swap: rebind to the process for that persona; cookies, storage and URL migrate; page reloads
+page.set_proxy("http://…")    # hot-swap the proxy (new browser context; same process unless geoip changes the resolved persona)
+shift_proxy() / shift_persona()   # round-robin over proxies: / personas:
+page.persona()                # {engine, seed, platform, locale, timezone, screen}; persona(explain: true) adds apostate's --fingerprint-explain text
+task fetch(url):
+    persona: "windows"        # the task's private page is created with it
+    retry: 3
+    on_fail: shift_persona()
+```
+
+Semantics:
+
+* `persona:` with `engine: chrome` is an error at first use, never
+  ignored. Apostate's rule is "serve what the persona claims"; a persona
+  silently dropped on stock Chrome would claim one machine and serve
+  another, which is exactly what a detector looks for.
+* A `ResolvedPersona` — seed, platform, locale, timezone, screen, *after*
+  geoip (Decision 14) — together with the engine is the `ProcessKey`. Two
+  pages with the same seed behind proxies that resolve to different
+  timezones get different processes.
+* The default process (slot 0) carries the `browser:` persona.
+  `max_processes` caps the slots; a process with zero pages is retired
+  when a new key needs a slot at the cap.
+* On stock Chrome, per-page proxies keep using
+  `Target.createBrowserContext{proxyServer}` in one process: no persona,
+  no extra process.
+* Hot-swaps (`set_persona`, `set_proxy`, `shift_persona()`,
+  `shift_proxy()`) are the single `Page::rebind_to` path — the same code
+  as supervisor restarts — so handlers are re-installed by the existing
+  post-rebind hook (`Runtime::rebind`) and nothing above `surf-browser`
+  learns a second mechanism.
+* Same seed ⇒ same machine every launch; no seed ⇒ Apostate draws one.
+  `seed: "host"` refuses per-field overrides (the launch exits non-zero),
+  so Surf refuses before launching. `--fingerprint*` switches are
+  validated against Apostate's own switch list, because Chromium ignores
+  a misspelled switch silently. `screen` is never derived from `size:`
+  (window size and claimed display are different claims).
+* Fonts for a Windows / macOS persona must be installed on the host
+  (`apostate fonts install windows`); Surf hints, never installs.
+
+Rules out: per-browser-context personas; a persona that is ignored on
+`engine: chrome`; deriving `screen` from `size:`; a second rebind
+mechanism for personas; Apostate code in core crates (Decision 7 stands).
+
+## 14. geoip for personas
+
+A persona claiming `Europe/Berlin` behind a proxy that exits in Virginia
+is a contradiction any detector can see; Apostate's own wrapper resolves
+locale and timezone from the proxy's exit IP when they are not given.
+Surf does the same: with `engine: apostate`, a proxy configured and
+`locale` / `timezone` unset, both are resolved from the proxy's exit IP
+through the plain-HTTP endpoints Apostate's wrapper uses —
+`http://ip-api.com/json/`, `http://ipinfo.io/json`, `http://ipwho.is/`,
+`http://ifconfig.co/json`, two attempts each, in that order, through the
+proxy itself — before the process for that persona launches. `geoip:
+true|false` on `browser:` overrides the default (`true` iff a proxy is
+configured and the engine is apostate; it is never on for stock Chrome,
+which has no persona to correct). Explicit `locale:` / `timezone:` win;
+with no proxy the host's values are used. The resolved values are part of
+the `ProcessKey` (Decision 13), so `set_proxy` to an exit in another
+timezone moves the page to another process. When every endpoint fails
+the launch fails with the endpoints tried — never a silent fall-back to
+the host's values ("never claim what you do not serve"). The suite stubs
+the endpoints in `surf-testserver` and never calls out. Rules out:
+geoip on stock Chrome, silent host fall-back, HTTPS-only endpoints the
+test proxy stub cannot serve.
+
+## 15. Apostate test policy
+
+Tests that need Apostate follow the Chrome rule in `AGENTS.md`:
+`surf_browser::discovery::apostate_or_skip(name)` — `SURF_APOSTATE=/path`
+overrides discovery (set-but-missing is an error, not a fallback);
+otherwise the cache (`APOSTATE_CACHE_DIR`, `~/Library/Caches/apostate`,
+`$XDG_CACHE_HOME/apostate` / `~/.cache/apostate`,
+`%LOCALAPPDATA%\apostate\cache`; `<version>/<platform-dir>/`, newest
+version first). When nothing is found the test prints `skipping <name>:
+no Apostate found …` with the locations tried and passes. They **must**
+actually run on the dev Mac (`~/Library/Caches/apostate` holds
+155.0.8059.31 and 152.0.7977.83) — never merge on a skip. CI runners
+have no Apostate, so a CI skip is expected and is not evidence; the dev
+Mac run is, and the report says so. `~/apostate` and the cache are never
+modified. Rules out: vendoring Apostate, a CI job that downloads it,
+merging on a skip.

@@ -140,8 +140,11 @@ installer URLs come from `repository` in `Cargo.toml`.
 
 The seams for what comes next — `engine: apostate`, per-page personas via
 process-per-persona + `Page::rebind`, the `pool:` / wasm build — are drawn
-in `docs/architecture.md` ("Roadmap seams") and tracked at the top of
-`TASKS.md`. Build against the seam; do not add a parallel mechanism.
+in `docs/architecture.md` ("Roadmap seams") and tracked by increment in
+`TASKS.md` (v0.2 polish, v0.3 engines and personas — design in
+`DECISIONS.md` #13–#15 and `docs/language.md` §12 — v0.4 language and
+tooling, v0.5 edge and scale). Build against the seam; do not add a
+parallel mechanism.
 
 ## Commits
 

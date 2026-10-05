@@ -491,7 +491,7 @@ browser:
     profile: "./profiles/alice"    # persistent user-data-dir
     flags: ["--lang=en-US"]
     timeout: 30s                   # default auto-wait timeout for actions
-    engine: chrome                 # `apostate` reserved (clear "not yet" error)
+    engine: chrome                 # `apostate` reserved (clear "not yet" error; planned syntax in § 12)
     downloads: "./downloads"       # allow downloads into this dir; wait_download()
 ```
 
@@ -1123,3 +1123,72 @@ document per line next to `emit`. `-` reads the script from stdin.
 `--trace-cdp` logs every CDP frame to stderr (`→` sent, `←` received) and
 one `first CDP frame sent N ms after start` line. What Surf sends and what
 detectors see is documented in `docs/quiet-cdp.md`.
+
+## 12. Engines and personas (v0.3 — not yet available)
+
+**Planned syntax, not implemented.** Today `engine: apostate` is a clear
+"not yet" error at first use and none of the keys or calls below exist;
+`surf check` rejects them as unknown keys. This section is the one spec
+the parser, `surf-browser` and the runtime build to in v0.3; the design
+and its reasons are `DECISIONS.md` #13 (persona language,
+process-per-persona key), #14 (geoip) and #15 (test policy).
+
+A persona is a fingerprint identity served by the Apostate engine (a
+Chromium fork). It belongs to a browser *process*, so every distinct
+persona is its own OS process behind one logical `browser`; `Page::rebind`
+(the mechanism behind `shift_proxy()` and supervisor restarts) moves a
+page between them.
+
+```
+browser:
+    engine: apostate          # chrome (default) | apostate
+    persona: 42               # seed shorthand
+    persona: "windows"        # platform shorthand (apostate draws the seed)
+    persona:                  # full form
+        seed: 42              # int, or "host" (then no other key is allowed)
+        platform: windows     # windows | macos | linux
+        locale: "en-US"       # optional; else geoip (when a proxy is set) else host
+        timezone: "Europe/Berlin"
+        screen: "1920x1080"   # optional; never derived from size:
+    personas: [42, {seed: 7, platform: macos}]   # rotation list for shift_persona()
+    geoip: true               # default true iff a proxy is configured and engine is apostate
+    max_processes: 8          # process-per-persona cap
+p = browser.new_page(persona: {seed: 7, platform: "macos"}, proxy: "http://…")
+page.set_persona(seed: 9)     # hot-swap: rebind to the process for that persona; cookies, storage and URL migrate; page reloads
+page.set_proxy("http://…")    # hot-swap the proxy (new browser context; same process unless geoip changes the resolved persona)
+shift_proxy() / shift_persona()   # round-robin over proxies: / personas:
+page.persona()                # {engine, seed, platform, locale, timezone, screen}; persona(explain: true) adds apostate's --fingerprint-explain text
+task fetch(url):
+    persona: "windows"        # the task's private page is created with it
+    retry: 3
+    on_fail: shift_persona()
+```
+
+Rules (planned):
+
+- `persona:` with `engine: chrome` is an error the first time the browser
+  is needed — never ignored. `engine: chrome` keeps today's behaviour:
+  per-page proxies are browser contexts in one process.
+- `seed: "host"` means "this machine's own fingerprint" and forbids every
+  other persona key. Same seed ⇒ same machine every launch; no seed ⇒
+  Apostate draws one. `screen` is a claimed display, not the window size,
+  so it is never derived from `size:`.
+- `locale` / `timezone` left unset are resolved from the proxy's exit IP
+  (`geoip: true`, the default whenever a proxy is set and the engine is
+  apostate); without a proxy the host's values are used; explicit keys
+  win. Resolution failure is an error, not a silent host fall-back.
+- A page's *resolved* persona (seed, platform, locale, timezone, screen,
+  after geoip) plus the engine selects its process. `max_processes` caps
+  the number of processes; a process with no pages is retired when a new
+  persona needs a slot. The `browser:` persona is the default process.
+- `set_persona`, `set_proxy`, `shift_persona()`, `shift_proxy()` keep the
+  same `page` value: cookies, storage and URL migrate, the page reloads,
+  handlers stay installed. `shift_persona()` without a `personas:` list is
+  an error, like `shift_proxy()` without `proxies:`.
+- `persona:` on a `task` applies to its private page; `on_fail:
+  shift_persona()` rotates before the retry.
+- `page.persona()` returns a map; `persona(explain: true)` adds Apostate's
+  `--fingerprint-explain` text under `explain`.
+- A Windows / macOS persona needs the matching fonts installed on the
+  host (`apostate fonts install windows`); Surf reports a hint, it does
+  not install them.
