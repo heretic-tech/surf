@@ -263,13 +263,24 @@ seam, not beside it.
       (22,260 B), `sha256.sum`, `source.tar.gz` (562,495 B),
       `dist-manifest.json`. Not yet done on the CI archives: unpack one
       and run `surf doctor` (only the local `dist build` archive was
-      exercised that way, see the step-11 notes in git history). Separate
-      from the release: `ci.yml` fails on heretic-tech (`test` jobs,
-      `crates/surf-browser/tests/launch.rs`, 4 tests): Linux — the
-      `setup-chrome` Chromium aborts with the SUID-sandbox error
-      (`chrome-sandbox` not root/4755 → needs `--no-sandbox` in CI only,
-      or a differently packaged Chrome); macOS — `Page.getFrameTree:
-      timed out`. Track as its own item.
+      exercised that way, see the step-11 notes in git history).
+- [x] `ci.yml` green on heretic-tech
+      (https://github.com/heretic-tech/surf/actions/runs/37257222508).
+      The 4 `crates/surf-browser/tests/launch.rs` failures were all
+      `browser-actions/setup-chrome`, whose "stable" is Chrome for
+      Testing: Linux — non-setuid `chrome-sandbox` plus ubuntu-24.04's
+      AppArmor userns restriction → SUID-sandbox abort at startup; macOS —
+      the bundle is cached without its `.app` wrapper, so every child
+      process dies at the Mach-port rendezvous (`bootstrap_look_up …
+      Permission denied`) and renderer-side `Page.getFrameTree` never
+      answers (reproduced locally by copying a CfT `Contents/` out of its
+      `.app`; renaming the directory to `*.app` fixes it); and headed CfT
+      shows its own permanent disclaimer infobar
+      (`ChromeForTestingInfoBarDelegate`, 143 px of window chrome vs
+      87 px on Google Chrome), which the no-infobar test cannot tell from
+      the automation one. CI now pins `SURF_CHROME` to the runner images'
+      stock Google Chrome stable (`/opt/google/chrome/chrome`,
+      `/Applications/Google Chrome.app/…`); no Surf code or flag changed.
 - [ ] `cargo publish` (crates.io) is not part of the pipeline; the
       procedure in `AGENTS.md` lists the order. `cargo install surf-cli`
       in the README is aspirational until the first publish.
@@ -284,7 +295,10 @@ seam, not beside it.
       after `Browser.close` returns would close that gap; make sure a
       `profile:` dir is never touched.
 - [ ] The `perf` CI job is `continue-on-error: true` (budgets set on this
-      Mac); make it blocking once the runners' numbers are known.
+      Mac); make it blocking once the runners' numbers are known. First
+      green run (37257222508): ubuntu-latest 1.33 ms / 8.4 MB / 31.7 ms,
+      macos-latest 2.42 ms / 5.9 MB / 100.3 ms (noop cold start / idle RSS
+      / first CDP frame) — all under budget; a few more runs, then flip.
 - [ ] `docs/language.md` §0 cheatsheet is hand-maintained; a `surf
       help <action>` or a generated list from `methods.rs::PAGE_METHODS`
       would keep it from drifting.

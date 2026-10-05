@@ -67,6 +67,18 @@ do not merge on a skip. The e2e suite is `cargo test -p surf-cli --test
 e2e`; the launcher's own suite is `cargo test -p surf-browser --test
 launch` (needs a display for the headed test).
 
+CI (`ci.yml`) pins `SURF_CHROME` to the stock Google Chrome stable that
+ships on the hosted runner images (`/opt/google/chrome/chrome`,
+`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`), under
+`xvfb-run` on Linux. Do not switch it to `browser-actions/setup-chrome`:
+its "stable" is Chrome for Testing, which aborts on ubuntu-24.04 (non-setuid
+`chrome-sandbox` + AppArmor userns restriction), is cached on macOS without
+its `.app` wrapper (child processes die at the Mach-port rendezvous, so
+renderer-side CDP such as `Page.getFrameTree` never answers), and headed
+shows its own permanent disclaimer infobar that fails the no-infobar test.
+None of those are Surf bugs; they are not to be papered over with launch
+flags.
+
 Apostate (a Chromium fork under `~/Library/Caches/apostate`) is **not** a
 dependency. Never touch `~/apostate`. Surf must work with stock Chrome.
 
