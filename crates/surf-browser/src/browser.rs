@@ -70,6 +70,9 @@ enum Origin {
 pub struct Browser {
     opts: LaunchOptions,
     origin: RefCell<Option<Origin>>,
+    /// The launched browser after [`close`](Self::close), kept so
+    /// [`cleanup`](Self::cleanup) can join its temp-profile removal.
+    closed_launch: RefCell<Option<Box<Launched>>>,
     conn: Arc<Connection>,
     pages: RefCell<Vec<Page>>,
     /// name → 1-based page index.
@@ -125,6 +128,7 @@ impl Browser {
         Ok(Rc::new(Browser {
             opts,
             origin: RefCell::new(Some(Origin::Launched(Box::new(launched)))),
+            closed_launch: RefCell::new(None),
             conn,
             pages: RefCell::new(Vec::new()),
             names: RefCell::new(HashMap::new()),
@@ -162,6 +166,7 @@ impl Browser {
         };
         Ok(Rc::new(Browser {
             opts,
+            closed_launch: RefCell::new(None),
             origin: RefCell::new(Some(Origin::Attached {
                 url: ws_url.to_owned(),
             })),
@@ -229,8 +234,13 @@ impl Browser {
                 what: "downloads".into(),
                 reason: "wait_download() needs `downloads: \"./dir\"` in the browser: block".into(),
             })?;
-        let frame_id = page.frame_id()?;
-        tracker.wait(&frame_id, timeout).await
+        // Attributed to the page when it started in its main frame or in
+        // any of its child frames (the page tracks `Page.frameAttached` /
+        // `frameDetached`).
+        page.frame_id()?;
+        tracker
+            .wait(|frame_id| page.owns_frame(frame_id), timeout)
+            .await
     }
 
     /// Every download seen so far (needs `downloads: dir`).
@@ -525,7 +535,24 @@ impl Browser {
     /// `SIGKILL`, temp profile removed (`profile:` kept). Attached: close
     /// the pages Surf created and drop the connection; the remote browser
     /// keeps running. Idempotent.
+    ///
+    /// The temp profile is removed on a background task that this joins
+    /// before returning; [`close_detached`](Self::close_detached) returns
+    /// as soon as the process is gone and leaves the join to
+    /// [`cleanup`](Self::cleanup).
     pub async fn close(&self) -> Result<(), BrowserError> {
+        self.close_inner(false).await
+    }
+
+    /// [`close`](Self::close) without waiting for the temp profile's
+    /// removal. The caller **must** call [`cleanup`](Self::cleanup) before
+    /// the process exits (`std::process::exit` runs no destructors, so a
+    /// forgotten join leaks the directory). Idempotent.
+    pub async fn close_detached(&self) -> Result<(), BrowserError> {
+        self.close_inner(true).await
+    }
+
+    async fn close_inner(&self, detach: bool) -> Result<(), BrowserError> {
         if self.closed.replace(true) {
             return Ok(());
         }
@@ -534,10 +561,15 @@ impl Browser {
         match origin {
             Some(Origin::Launched(l)) => {
                 // The process is going away: no per-page CDP traffic.
-                l.close().await;
+                if detach {
+                    l.close_detached().await;
+                } else {
+                    l.close().await;
+                }
                 for p in &pages {
                     p.forget();
                 }
+                *self.closed_launch.borrow_mut() = Some(l);
             }
             Some(Origin::Attached { url }) => {
                 for p in &pages {
@@ -561,5 +593,16 @@ impl Browser {
         }
         self.names.borrow_mut().clear();
         Ok(())
+    }
+
+    /// After [`close_detached`](Self::close_detached): wait for the temp
+    /// profile's background removal (`Launched::cleanup`). No-op for
+    /// attached browsers, a `profile:` dir, before `close`, or after
+    /// [`close`](Self::close) (which joins itself). Idempotent.
+    pub async fn cleanup(&self) {
+        let launched = self.closed_launch.borrow_mut().take();
+        if let Some(l) = launched {
+            l.cleanup().await;
+        }
     }
 }

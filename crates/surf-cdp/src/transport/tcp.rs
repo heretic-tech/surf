@@ -2,19 +2,54 @@
 //! `webSocketDebuggerUrl`, connect. Used for `cdp: 9222` and for attaching
 //! to an already-running browser. No HTTP client dependency: one GET over a
 //! raw `TcpStream` is all the DevTools endpoint needs.
+//!
+//! Every step (TCP connect, the GET, the websocket handshake) is bounded:
+//! [`connect`] / [`discover_ws_url`] use [`DEFAULT_TIMEOUT`] per step,
+//! [`connect_with_timeout`] / [`discover_ws_url_with_timeout`] take the
+//! caller's (the launcher polls a starting browser with a short one).
 
 use super::ws::WsTransport;
+use std::future::Future;
 use std::io;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-/// GET `http://host:port/json/version` and return `webSocketDebuggerUrl`.
+/// Per-step bound of [`connect`] and [`discover_ws_url`].
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
+
+async fn bounded<T>(
+    what: &str,
+    timeout: Duration,
+    f: impl Future<Output = io::Result<T>>,
+) -> io::Result<T> {
+    match tokio::time::timeout(timeout, f).await {
+        Ok(r) => r,
+        Err(_) => Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!("{what} timed out after {timeout:?}"),
+        )),
+    }
+}
+
+/// GET `http://host:port/json/version` and return `webSocketDebuggerUrl`
+/// ([`DEFAULT_TIMEOUT`] per step).
 ///
 /// `host` should be `localhost` or an IP literal: Chrome rejects other
 /// `Host` headers (DNS-rebinding protection) unless started with
 /// `--remote-allow-origins`.
 pub async fn discover_ws_url(host: &str, port: u16) -> io::Result<String> {
-    let body = http_get(host, port, "/json/version").await?;
+    discover_ws_url_with_timeout(host, port, DEFAULT_TIMEOUT).await
+}
+
+/// [`discover_ws_url`] with `timeout` for the TCP connect and again for
+/// the request/response.
+pub async fn discover_ws_url_with_timeout(
+    host: &str,
+    port: u16,
+    timeout: Duration,
+) -> io::Result<String> {
+    let body = http_get(host, port, "/json/version", timeout).await?;
     let v: serde_json::Value = serde_json::from_slice(&body)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("/json/version: {e}")))?;
     v.get("webSocketDebuggerUrl")
@@ -28,34 +63,55 @@ pub async fn discover_ws_url(host: &str, port: u16) -> io::Result<String> {
         })
 }
 
-/// Discover the browser websocket URL for `host:port` and connect to it.
+/// Discover the browser websocket URL for `host:port` and connect to it
+/// ([`DEFAULT_TIMEOUT`] per step).
 pub async fn connect(host: &str, port: u16) -> io::Result<WsTransport> {
-    let url = discover_ws_url(host, port).await?;
-    WsTransport::connect(&url).await
+    connect_with_timeout(host, port, DEFAULT_TIMEOUT).await
+}
+
+/// [`connect`] with `timeout` applied to each step: TCP connect, the
+/// `/json/version` exchange, the websocket handshake.
+pub async fn connect_with_timeout(
+    host: &str,
+    port: u16,
+    timeout: Duration,
+) -> io::Result<WsTransport> {
+    let url = discover_ws_url_with_timeout(host, port, timeout).await?;
+    bounded("websocket handshake", timeout, WsTransport::connect(&url)).await
 }
 
 /// Minimal HTTP/1.1 GET returning the response body. Chrome ignores
 /// `Connection: close` and keeps the socket open, so reading stops as soon
 /// as `Content-Length` bytes of body have arrived (EOF otherwise).
-pub(crate) async fn http_get(host: &str, port: u16, path: &str) -> io::Result<Vec<u8>> {
-    let mut stream = TcpStream::connect((host, port)).await?;
+/// `timeout` bounds the connect and, separately, the whole exchange.
+pub(crate) async fn http_get(
+    host: &str,
+    port: u16,
+    path: &str,
+    timeout: Duration,
+) -> io::Result<Vec<u8>> {
+    let mut stream = bounded("tcp connect", timeout, TcpStream::connect((host, port))).await?;
     let req = format!(
         "GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
     );
-    stream.write_all(req.as_bytes()).await?;
-    let mut raw = Vec::with_capacity(1024);
-    let mut buf = [0u8; 4096];
-    loop {
-        if let Some(end) = response_complete(&raw) {
-            raw.truncate(end);
-            break;
+    let exchange = async {
+        stream.write_all(req.as_bytes()).await?;
+        let mut raw = Vec::with_capacity(1024);
+        let mut buf = [0u8; 4096];
+        loop {
+            if let Some(end) = response_complete(&raw) {
+                raw.truncate(end);
+                break;
+            }
+            let n = stream.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            raw.extend_from_slice(&buf[..n]);
         }
-        let n = stream.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        raw.extend_from_slice(&buf[..n]);
-    }
+        Ok(raw)
+    };
+    let raw = bounded(&format!("GET {path}"), timeout, exchange).await?;
     parse_response(&raw)
 }
 
@@ -162,5 +218,25 @@ mod tests {
         });
         let url = discover_ws_url("127.0.0.1", port).await.unwrap();
         assert_eq!(url, "ws://127.0.0.1:1/devtools/browser/x");
+    }
+
+    #[tokio::test]
+    async fn times_out_on_a_silent_endpoint() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // Accept and never answer.
+        let hold = tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            drop(sock);
+        });
+        let started = std::time::Instant::now();
+        let err = connect_with_timeout("127.0.0.1", port, Duration::from_millis(200))
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut, "{err}");
+        assert!(err.to_string().contains("/json/version"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        hold.abort();
     }
 }

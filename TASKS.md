@@ -86,38 +86,67 @@ commit; the gates in `AGENTS.md` are part of done.
       (bumped on that frame's `Page.frameNavigated`); `Element::frame()`.
       Out-of-process iframes are listed but have no reachable world (their
       own targets; `## Later`). Test `child_frames_have_their_own_worlds`.
-- [ ] `wait_download()` matches downloads by the page's main `frameId`; a
-      download started from an iframe is not attributed to the page. Track
-      child frame ids when the frames API lands.
+- [x] `wait_download()` attributes a download to the page when its
+      `frameId` is the main frame or any tracked child frame
+      (`Page::owns_frame`; ids from the frame tree + `Page.frameAttached` /
+      `frameDetached`; `DownloadTracker::wait(owns: impl Fn(&str) -> bool,
+      timeout)`). Test `iframe_download_is_attributed_and_profile_is_removed`.
 - [ ] `intercept` cannot see or rewrite response bodies (`Fetch.requestPaused`
       at the response stage, `Fetch.getResponseBody`, `fulfil` after the
-      real response); only request-stage decisions exist today.
+      real response); only request-stage decisions exist today. **Deferred
+      from the v0.2 browser batch** (step budget): design is
+      `Page::intercept_at(InterceptStage::{Request, Response}, patterns)`
+      → `Fetch.enable{patterns: [{urlPattern, requestStage: "Response"}]}`,
+      `InterceptedRequest::{status, headers, body()}` via
+      `Fetch.getResponseBody`, then `fulfil` / `continue_response`. Same
+      `FetchHub`, so `Fetch` stays off unless an interceptor exists.
 - [ ] `block([...])` patterns use Chrome's own `*` matcher (unanchored
       substring glob) while hooks / `wait_url` use Surf's anchored glob;
       documented, but a `re:` pattern for `block` would need a Fetch-based
-      implementation.
-- [ ] surf-browser: `Element` handles are released with a spawned
-      `Runtime.releaseObject` on drop; a page that never navigates and
-      resolves millions of elements still accumulates nothing, but a
-      `Runtime.releaseObjectGroup("surf")` sweep on navigation would be
-      cheaper than per-handle releases if a profile shows it.
-- [ ] Surf's launch → title → close round trip (488 ms) trails Puppeteer
-      (453 ms) by the shutdown ladder's profile-removal wait (≈ 96 ms,
-      `docs/quiet-cdp.md` §5). Removing the temp profile asynchronously
-      after `Browser.close` returns would close that gap; make sure a
-      `profile:` dir is never touched.
-- [ ] surf-browser launcher: port mode (`cdp: N`) connects through
-      `surf_cdp::transport::tcp::connect`, which has no timeouts of its own;
-      the launcher wraps each attempt in 3 s. Fold a timeout into `tcp` if
-      attach mode (`cdp: "ws://…"`, step 7) needs one too.
-- [ ] surf-browser: `pdf()` is headless-only (Chrome refuses
-      `Page.printToPDF` headed); surface a clear message in the runtime.
-- [ ] `Page::mark_action` keeps two broadcast receivers armed between an
-      action and the next `wait_navigation()` / action; a script that
-      never calls `wait_navigation()` after a `click` holds them until the
-      next action, and more than `EVENT_CHANNEL_CAPACITY` (1024) lifecycle
-      events in between would log a lag warning. Harmless; drop the armed
-      state on a timer if it ever shows up in logs.
+      implementation. **Deferred with the item above**: `re:` entries go
+      through a `FetchHub` need (`Fetch.failRequest{BlockedByClient}` on
+      match), plain entries keep `Network.setBlockedURLs`.
+- [x] surf-browser: `Element` drops queue their handle (`Page::push_garbage`)
+      and the next `world()` releases the queue in background batches of
+      256 `Runtime.releaseObject`s; re-creating the main world after a
+      navigation sweeps the old world with `Runtime.releaseObjectGroup("surf")`
+      and forgets the queue. `Page::pending_releases()` exposes the queue.
+- [x] Temp-profile removal: `Launched::close_detached()` /
+      `Browser::close_detached()` move the removal (20 × 100 ms retry while
+      Chrome's helpers let go) to a background task that
+      `Launched::cleanup()` / `Browser::cleanup()` join; plain `close()`
+      keeps joining inline, so no caller leaks a directory by default
+      (`std::process::exit` runs no destructors — the runtime must call
+      `cleanup()` before exiting if it switches to `close_detached`). A
+      `profile:` dir is never touched (`ProfileDir::detach_cleanup` returns
+      `None`). Measured on this Mac (20 × `surf run title.surf`,
+      interleaved): before 585–590 ms median, detached 563–569 ms; the
+      removal itself is ≈ 12 ms after `close_detached` returns (the ≈ 96 ms
+      in `docs/quiet-cdp.md` §5 was not reproducible today), so the
+      runtime switch is optional.
+- [x] `surf_cdp::transport::tcp`: every step is bounded — `connect` /
+      `discover_ws_url` use `DEFAULT_TIMEOUT` (10 s) per step (TCP connect,
+      `/json/version` exchange, websocket handshake);
+      `connect_with_timeout` / `discover_ws_url_with_timeout` take the
+      caller's (the launcher passes its 3 s poll). Test
+      `times_out_on_a_silent_endpoint`. Attach mode (`cdp: "ws://…"`) goes
+      through `WsTransport::connect` directly and still has no bound of its
+      own (`## Later`).
+- [x] `pdf()` / `pdf_bytes()` headed: Chrome's `PrintToPDF is not
+      implemented` becomes `BrowserError::HeadlessOnly { action: "pdf" }`
+      ("needs a headless browser … set `headless: true`"); the runtime
+      surfaces it as any other `BrowserError`.
+- [x] `Page::mark_action`: the armed receivers carry a generation and a
+      spawned timer drops them after `ARMED_TTL` (10 s) unless the next
+      action replaced them or `wait_for_navigation` consumed them
+      (`Page::is_armed()` for tests).
+- [ ] `crates/surf-browser/tests/pages.rs::auto_wait_and_timeouts` is
+      timing-sensitive under the full parallel suite (15 headless Chromes on
+      one laptop): the `#appeared` absence check is now skipped when the
+      first world came up late, but the test still failed once in three
+      full-suite runs during the v0.2 browser batch (passes alone and in
+      most full runs). Capture the failing assertion and relax or serialise
+      it.
 
 ### Runtime
 - [ ] Supervisor restarts rebind the child's page `SameContext` (cookies /

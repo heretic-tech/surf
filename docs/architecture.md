@@ -556,7 +556,10 @@ impl Browser {
     pub async fn rebind_page(&self, page: &Page, proxy: Option<&str>, migration: Migration) -> Result<(), BrowserError>;
     pub async fn rebind_page_to(&self, page: &Page, target: RebindTarget, migration: Migration) -> Result<(), BrowserError>; // SameContext | FreshContext | Proxy(url)
     pub fn page_proxy(&self, page: &Page) -> Option<String>;                        // proxy of the page's private context
-    pub async fn close(&self) -> Result<(), BrowserError>;                          // idempotent; attached browsers are never closed
+    pub async fn wait_download(&self, page: &Page, timeout: Duration) -> Result<PathBuf, _>;   // main frame or any child frame of `page`
+    pub async fn close(&self) -> Result<(), BrowserError>;                          // idempotent; attached browsers are never closed; joins the temp-profile removal
+    pub async fn close_detached(&self) -> Result<(), BrowserError>;                 // same, removal on a background task — caller must `cleanup()` before exit
+    pub async fn cleanup(&self);                                                    // join the removal (no-op after `close`, for `profile:`, for attached)
 }
 
 pub struct Backing { pub session: Session, pub target_id: String, pub browser_context_id: Option<String>, pub frame_id: String }
@@ -580,7 +583,8 @@ impl Page {
     pub async fn url(&self) -> Result<String, _>;  pub async fn title(&self) -> Result<String, _>;
     pub fn on_dialog(&self, policy: DialogPolicy);  pub fn dialogs(&self) -> Vec<Dialog>;
     pub async fn screenshot(&self, path: &Path, full_page: bool);  pub async fn screenshot_png(&self, full_page: bool) -> Result<Vec<u8>, _>;
-    pub async fn pdf(&self, path: &Path);  pub async fn pdf_bytes(&self) -> Result<Vec<u8>, _>;
+    pub async fn pdf(&self, path: &Path);  pub async fn pdf_bytes(&self) -> Result<Vec<u8>, _>;   // headed → BrowserError::HeadlessOnly { action: "pdf" }
+    pub fn owns_frame(&self, frame_id: &str) -> bool;  pub fn is_armed(&self) -> bool;  pub fn pending_releases(&self) -> usize;
     pub async fn set_viewport(&self, w: u32, h: u32);
     pub async fn cookies(&self) -> Result<Vec<Cookie>, _>;  pub async fn set_cookies(&self, &[Cookie]);  pub async fn clear_cookies(&self);
     pub async fn local_storage(&self) -> Result<Map, _>;  pub async fn set_local_storage(&self, Map);  pub async fn clear_local_storage(&self);
@@ -661,8 +665,10 @@ every action that can navigate (`click`, `press`, …) first calls
 `wait_for_navigation` that follows takes those armed receivers, so a
 navigation that committed between the action and the wait is still seen
 (`commit` returns at once when the epoch already advanced). The armed
-state is consumed by the wait, replaced by the next action and dropped on
-rebind / close. `url()` reads `location.href` in the isolated world.
+state is consumed by the wait, replaced by the next action, dropped on
+rebind / close, and dropped by a timer after `ARMED_TTL` (10 s) so a
+script that never waits does not hold two buffering subscriptions.
+`url()` reads `location.href` in the isolated world.
 
 **Frames.** Every action, reader and wait is implemented once on
 `Frame`; `Page` forwards to `main_frame()`. A child frame's world is one
@@ -687,7 +693,11 @@ event task bumps a navigation epoch on every main-frame
 navigation the task has not yet seen surfaces as a `Cannot find context` /
 `Execution context was destroyed` protocol error, which `with_world`
 answers by re-creating the world and retrying once. All handles live in
-object group `surf`.
+object group `surf`: a dropped `Element` only queues its id
+(`push_garbage`), the next `world()` releases the queue in background
+batches of 256 `Runtime.releaseObject`s, and re-creating the world after
+a navigation sweeps the old one with `Runtime.releaseObjectGroup("surf")`
+and forgets the queue.
 
 **Dialogs.** `Page.javascriptDialogOpening` is answered by the event task
 per `DialogPolicy` (`Accept` by default — a prompt returns its default
@@ -761,7 +771,9 @@ default context (and every private one as it is created) and runs one
 `Browser.downloadWillBegin` / `downloadProgress`, renames the finished
 `<guid>` file to its `suggestedFilename` (de-duplicated) and serves
 `Browser::wait_download(page, timeout)` — the next completed download
-whose `frameId` belongs to that page.
+whose `frameId` is the page's main frame or one of its child frames
+(`Page::owns_frame`, over ids seeded from the frame tree and kept by
+`Page.frameAttached` / `frameDetached`).
 
 **Storage.** `local_storage()` / `set_local_storage` / `clear_local_storage`
 are isolated-world evals on the current origin (no `DOMStorage` domain).

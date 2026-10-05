@@ -34,6 +34,7 @@ use crate::display::{has_display, VirtualDisplay};
 use crate::error::BrowserError;
 use futures::future::BoxFuture;
 use std::collections::VecDeque;
+use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -462,27 +463,36 @@ impl ProfileDir {
     /// may still be writing into it right after the browser exits. A
     /// persistent profile is left alone. Idempotent.
     pub async fn cleanup(&self) {
-        let Some(temp) = self.temp.lock().expect("profile poisoned").take() else {
-            return;
-        };
-        for attempt in 0..20u32 {
-            match std::fs::remove_dir_all(&self.path) {
-                Ok(()) => break,
-                Err(e) if e.kind() == io::ErrorKind::NotFound => break,
-                Err(e) => {
-                    if attempt == 19 {
-                        tracing::warn!(
-                            "could not remove temp profile {}: {e}",
-                            self.path.display()
-                        );
-                    } else {
-                        tokio::time::sleep(Duration::from_millis(100)).await;
+        if let Some(task) = self.detach_cleanup() {
+            task.await;
+        }
+    }
+
+    /// Take the temp dir out and return a future that removes it (with the
+    /// retry loop of [`cleanup`](Self::cleanup)); `None` for a persistent
+    /// profile or when already taken. The caller decides whether to await
+    /// it or spawn it (`Launched::close` spawns so the shutdown ladder
+    /// does not wait on the file system; `Launched::cleanup` joins it).
+    fn detach_cleanup(&self) -> Option<impl Future<Output = ()> + Send + 'static> {
+        let temp = self.temp.lock().expect("profile poisoned").take()?;
+        let path = self.path.clone();
+        Some(async move {
+            for attempt in 0..20u32 {
+                match std::fs::remove_dir_all(&path) {
+                    Ok(()) => break,
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => break,
+                    Err(e) => {
+                        if attempt == 19 {
+                            tracing::warn!("could not remove temp profile {}: {e}", path.display());
+                        } else {
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
                     }
                 }
             }
-        }
-        // `TempDir::drop` makes one more best-effort attempt.
-        drop(temp);
+            // `TempDir::drop` makes one more best-effort attempt.
+            drop(temp);
+        })
     }
 
     /// Synchronous best-effort removal (used from `Drop`).
@@ -745,6 +755,9 @@ pub struct Launched {
     /// The argument vector that was passed (for `surf doctor` / tracing).
     pub args: Vec<String>,
     closed: AtomicBool,
+    /// The temp-profile removal spawned by [`close`](Self::close); joined
+    /// by [`cleanup`](Self::cleanup).
+    cleanup: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl std::fmt::Debug for Launched {
@@ -780,9 +793,24 @@ impl Launched {
     }
 
     /// The shutdown ladder: `Browser.close` → wait 2 s → `SIGTERM` → wait
-    /// 2 s → `SIGKILL`; then close the connection, remove a temp profile,
-    /// stop Xvfb. Idempotent; safe to call from a Ctrl-C handler.
+    /// 2 s → `SIGKILL`; then close the connection, remove a temp profile
+    /// (a `profile:` dir is never touched), stop Xvfb. Idempotent; safe to
+    /// call from a Ctrl-C handler.
     pub async fn close(&self) {
+        self.close_inner(false).await;
+        self.cleanup().await;
+    }
+
+    /// [`close`](Self::close) with the temp-profile removal (which waits
+    /// for Chrome's helpers to let go of the directory) on a background
+    /// task instead of inline; [`cleanup`](Self::cleanup) joins it. The
+    /// caller must do so before the process exits — `std::process::exit`
+    /// runs no destructors, so an unjoined task leaks the directory.
+    pub async fn close_detached(&self) {
+        self.close_inner(true).await;
+    }
+
+    async fn close_inner(&self, detach: bool) {
         if self.closed.swap(true, Ordering::SeqCst) {
             return;
         }
@@ -806,11 +834,31 @@ impl Launched {
             }
         }
         self.connection.close();
-        self.profile_dir.cleanup().await;
+        if let Some(remove) = self.profile_dir.detach_cleanup() {
+            match tokio::runtime::Handle::try_current() {
+                Ok(h) if detach => {
+                    *self.cleanup.lock().expect("cleanup") = Some(h.spawn(remove));
+                }
+                _ => remove.await,
+            }
+        }
         if let Some(d) = &self.display {
             d.stop().await;
         }
         tracing::debug!("browser {} closed", self.pid());
+    }
+
+    /// Join the temp-profile removal started by
+    /// [`close_detached`](Self::close_detached); remove inline when nothing
+    /// started it. No-op for a `profile:` dir or after [`close`](Self::close).
+    /// Idempotent.
+    pub async fn cleanup(&self) {
+        let task = self.cleanup.lock().expect("cleanup").take();
+        if let Some(t) = task {
+            let _ = t.await;
+        }
+        // `close` not called (or no runtime): remove inline.
+        self.profile_dir.cleanup().await;
     }
 }
 
@@ -966,6 +1014,7 @@ pub async fn launch(cfg: LaunchConfig) -> Result<Launched, BrowserError> {
         path: cfg.path,
         args,
         closed: AtomicBool::new(false),
+        cleanup: Mutex::new(None),
     })
 }
 
@@ -1008,15 +1057,15 @@ async fn connect_port(
             Some(port)
         };
         if let Some(p) = actual {
-            let attempt = tokio::time::timeout(
+            match surf_cdp::transport::tcp::connect_with_timeout(
+                "127.0.0.1",
+                p,
                 PORT_CONNECT_ATTEMPT,
-                surf_cdp::transport::tcp::connect("127.0.0.1", p),
             )
-            .await;
-            match attempt {
-                Ok(Ok(t)) => return Ok(Box::new(t)),
-                Ok(Err(e)) => last_err = Some(e),
-                Err(_) => last_err = Some(io::Error::new(io::ErrorKind::TimedOut, "connect")),
+            .await
+            {
+                Ok(t) => return Ok(Box::new(t)),
+                Err(e) => last_err = Some(e),
             }
         }
         if let Some(exit) = process.exit_status() {

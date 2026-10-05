@@ -648,6 +648,68 @@ async fn child_frames_have_their_own_worlds() {
     b.close().await.unwrap();
 }
 
+/// A download started inside a child frame is attributed to the page
+/// (`Page::owns_frame` over the tracked child frame ids); `Browser::close`
+/// hands the temp profile to a background task that `cleanup()` joins.
+#[tokio::test]
+async fn iframe_download_is_attributed_and_profile_is_removed() {
+    let Some(chrome) = surf_browser::discovery::chrome_or_skip(
+        "iframe_download_is_attributed_and_profile_is_removed",
+    ) else {
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let b = surf_browser::Browser::launch(surf_browser::LaunchOptions {
+        path: Some(chrome),
+        headless: Some(true),
+        timeout: Duration::from_secs(10),
+        downloads: Some(dir.path().join("dl")),
+        ..Default::default()
+    })
+    .await
+    .expect("launch");
+    let fx = Fixture::start().await;
+    let page = b.page(1).await.unwrap();
+    page.goto(&fx.url("/frames.html"), WaitUntil::Load)
+        .await
+        .unwrap();
+    // Point the first iframe at the download fixture and click inside it.
+    page.eval("document.getElementById('f1').src = '/download.html'")
+        .await
+        .unwrap();
+    let first = page.frame(FrameRef::Name("first".into())).await.unwrap();
+    first.wait("#dl", opts()).await.unwrap();
+    assert!(page.owns_frame(first.frame_id()));
+    first.click("#dl", opts()).await.unwrap();
+    let path = b
+        .wait_download(&page, Duration::from_secs(10))
+        .await
+        .expect("download attributed to the page");
+    assert_eq!(path.file_name().unwrap(), "report.txt");
+    assert!(path.exists());
+
+    let profile = b
+        .with_launched(|l| l.profile_dir.path().to_path_buf())
+        .expect("launched");
+    assert!(profile.exists());
+    let closed_at = Instant::now();
+    b.close_detached().await.unwrap();
+    let close_took = closed_at.elapsed();
+    b.cleanup().await;
+    assert!(
+        !profile.exists(),
+        "temp profile left at {}",
+        profile.display()
+    );
+    // Idempotent; `close` after `close_detached` is a no-op.
+    b.cleanup().await;
+    b.close().await.unwrap();
+    println!(
+        "close_detached: {close_took:?}, +cleanup: {:?}",
+        closed_at.elapsed()
+    );
+}
+
 /// Shadow DOM piercing (CSS and `text=`), `fill()` on special inputs and
 /// `set_files()` on a file input.
 #[tokio::test]

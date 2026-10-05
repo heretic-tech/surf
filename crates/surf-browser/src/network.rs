@@ -827,16 +827,21 @@ impl DownloadTracker {
         self.downloads.lock().expect("downloads").clone()
     }
 
-    /// Wait for the next unconsumed download started by `frame_id` to
+    /// Wait for the next unconsumed download started by a frame `owns`
+    /// accepts (a page's main frame or one of its child frames) to
     /// complete; returns its final path.
-    pub async fn wait(&self, frame_id: &str, timeout: Duration) -> Result<PathBuf, BrowserError> {
+    pub async fn wait(
+        &self,
+        owns: impl Fn(&str) -> bool,
+        timeout: Duration,
+    ) -> Result<PathBuf, BrowserError> {
         let started = Instant::now();
         loop {
             {
                 let mut list = self.downloads.lock().expect("downloads");
                 if let Some(d) = list
                     .iter_mut()
-                    .find(|d| !d.consumed && d.frame_id == frame_id && d.state != "inProgress")
+                    .find(|d| !d.consumed && owns(&d.frame_id) && d.state != "inProgress")
                 {
                     d.consumed = true;
                     return match (d.state.as_str(), d.path.clone()) {
@@ -855,7 +860,7 @@ impl DownloadTracker {
                     .lock()
                     .expect("downloads")
                     .iter()
-                    .any(|d| !d.consumed && d.frame_id == frame_id);
+                    .any(|d| !d.consumed && owns(&d.frame_id));
                 return Err(BrowserError::Timeout {
                     action: "wait_download".into(),
                     selector: None,
