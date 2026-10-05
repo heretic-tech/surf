@@ -243,22 +243,33 @@ seam, not beside it.
       copy carrying the old `repository` URL and the old `v0.1.0` tag
       (on `0009cf8`): delete it when/if that account is restored. The local
       clone keeps it as remote `suspended` with push disabled.
-- [ ] `.github/workflows/release.yml` has never run: the first `v0.1.0`
-      tag is the first exercise of the five-target matrix (the
-      `aarch64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` builds in
-      particular — Windows has no CI job at all, see the pipe-transport
-      item above). Local proof at the tag: `dist plan --tag=v0.1.0`
-      lists all five archives + `source.tar.gz`, `surf-cli-installer.sh`,
-      `surf-cli-installer.ps1`, `sha256.sum`; `dist build
-      --artifacts=local --target=aarch64-apple-darwin` produced
-      `surf-cli-aarch64-apple-darwin.tar.xz` (2,017,628 B, sha256
-      `442ec050…05b54d`, `surf` 6,885,648 B unpacked, Mach-O arm64);
-      the extracted binary answers `surf --version` → `surf 0.1.0` and
-      `surf doctor` → launch ok (Chrome 154.0.8037.95, pipe, first
-      `Browser.getVersion` in 373 ms, round trip 9 ms, shutdown 110 ms).
-      `dist build --artifacts=global` produced `source.tar.gz`
-      (562,072 B), `surf-cli-installer.sh` (53,387 B),
-      `surf-cli-installer.ps1` (22,255 B), `sha256.sum`.
+- [x] `.github/workflows/release.yml` ran for the first time on
+      2026-10-05 for tag `v0.1.0` (annotated, on `7458171`, the commit that
+      moved `repository` to `heretic-tech/surf`):
+      https://github.com/heretic-tech/surf/actions/runs/37255902959 —
+      green on the first attempt, 7 m 41 s. All five targets built
+      (`aarch64-unknown-linux-gnu` 1 m 30 s, `x86_64-unknown-linux-gnu`
+      1 m 34 s, `aarch64-apple-darwin` 1 m 41 s, `x86_64-pc-windows-msvc`
+      2 m 44 s, `x86_64-apple-darwin` 6 m 08 s), then
+      `build-global-artifacts`, `host`, `announce`. Release
+      https://github.com/heretic-tech/surf/releases/tag/v0.1.0 carries
+      `surf-cli-aarch64-apple-darwin.tar.xz` (2,008,012 B),
+      `surf-cli-x86_64-apple-darwin.tar.xz` (2,309,000 B),
+      `surf-cli-x86_64-unknown-linux-gnu.tar.xz` (2,367,848 B),
+      `surf-cli-aarch64-unknown-linux-gnu.tar.xz` (2,054,024 B),
+      `surf-cli-x86_64-pc-windows-msvc.zip` (3,738,087 B), their
+      `.sha256` files, `surf-cli-installer.sh` (54,052 B — 5 mentions of
+      `heretic-tech`, 0 of the old account), `surf-cli-installer.ps1`
+      (22,260 B), `sha256.sum`, `source.tar.gz` (562,495 B),
+      `dist-manifest.json`. Not yet done on the CI archives: unpack one
+      and run `surf doctor` (only the local `dist build` archive was
+      exercised that way, see the step-11 notes in git history). Separate
+      from the release: `ci.yml` fails on heretic-tech (`test` jobs,
+      `crates/surf-browser/tests/launch.rs`, 4 tests): Linux — the
+      `setup-chrome` Chromium aborts with the SUID-sandbox error
+      (`chrome-sandbox` not root/4755 → needs `--no-sandbox` in CI only,
+      or a differently packaged Chrome); macOS — `Page.getFrameTree:
+      timed out`. Track as its own item.
 - [ ] `cargo publish` (crates.io) is not part of the pipeline; the
       procedure in `AGENTS.md` lists the order. `cargo install surf-cli`
       in the README is aspirational until the first publish.
