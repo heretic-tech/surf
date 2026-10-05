@@ -39,32 +39,43 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build -p surf-syntax -p surf-vm --target wasm32-unknown-unknown
 
+  # Chrome-needing jobs use the stock Google Chrome stable that ships on the
+  # hosted runner images (the platform defaults `surf_browser::discovery`
+  # tries), pinned through SURF_CHROME so a missing binary is an error, not
+  # a skip. Not browser-actions/setup-chrome: its "stable" is Chrome for
+  # Testing, which (1) on Linux ships a non-setuid chrome-sandbox and aborts
+  # at startup under ubuntu-24.04's AppArmor userns restriction, (2) on
+  # macOS is cached without the `.app` wrapper, so every child process dies
+  # at the Mach-port rendezvous (`bootstrap_look_up … Permission denied`)
+  # and renderer-side CDP (`Page.getFrameTree`) never answers, and (3) in
+  # headed mode shows its own permanent disclaimer infobar, which the
+  # no-infobar launch test cannot tell from the automation one.
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            chrome: /opt/google/chrome/chrome
+          - os: macos-latest
+            chrome: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
     runs-on: ${{ matrix.os }}
+    env:
+      SURF_CHROME: ${{ matrix.chrome }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - uses: browser-actions/setup-chrome@v1
-        id: chrome
-        with:
-          chrome-version: stable
+      - name: Chrome version
+        run: '"$SURF_CHROME" --version'
       - name: Install xvfb (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb
       - name: cargo test (Linux, under xvfb)
         if: runner.os == 'Linux'
-        env:
-          SURF_CHROME: ${{ steps.chrome.outputs.chrome-path }}
         run: xvfb-run -a cargo test --workspace
       - name: cargo test (macOS)
         if: runner.os == 'macOS'
-        env:
-          SURF_CHROME: ${{ steps.chrome.outputs.chrome-path }}
         run: cargo test --workspace
 
   e2e:
@@ -72,28 +83,28 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            chrome: /opt/google/chrome/chrome
+          - os: macos-latest
+            chrome: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
     runs-on: ${{ matrix.os }}
+    env:
+      SURF_CHROME: ${{ matrix.chrome }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - uses: browser-actions/setup-chrome@v1
-        id: chrome
-        with:
-          chrome-version: stable
+      - name: Chrome version
+        run: '"$SURF_CHROME" --version'
       - name: Install xvfb (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb
       - name: e2e (Linux, under xvfb)
         if: runner.os == 'Linux'
-        env:
-          SURF_CHROME: ${{ steps.chrome.outputs.chrome-path }}
         run: xvfb-run -a cargo test -p surf-cli --test e2e -- --nocapture
       - name: e2e (macOS)
         if: runner.os == 'macOS'
-        env:
-          SURF_CHROME: ${{ steps.chrome.outputs.chrome-path }}
         run: cargo test -p surf-cli --test e2e -- --nocapture
 
   # Performance gates (tests/perf.rs) on a release build. Reported, not yet
@@ -105,18 +116,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            chrome: /opt/google/chrome/chrome
+          - os: macos-latest
+            chrome: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
     runs-on: ${{ matrix.os }}
     continue-on-error: true
+    env:
+      SURF_CHROME: ${{ matrix.chrome }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - uses: browser-actions/setup-chrome@v1
-        id: chrome
-        with:
-          chrome-version: stable
+      - name: Chrome version
+        run: '"$SURF_CHROME" --version'
       - name: perf gates (release)
-        env:
-          SURF_CHROME: ${{ steps.chrome.outputs.chrome-path }}
         run: cargo test --release -p surf-cli --test perf -- --nocapture --test-threads=1
