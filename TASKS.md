@@ -229,32 +229,20 @@ seam, not beside it.
       eval (above) lands.
 
 ## Release / docs (step 11)
-- [ ] Move the repo to `heretic-tech/surf`. `repository` in `Cargo.toml`,
-      the README badges and the `curl | sh` / `irm | iex` one-liners now
-      point at the real remote, `0xchasercat/surf` (the org is visible to
-      the `0xchasercat` account but `gh repo create heretic-tech/surf` is
-      refused — no `CreateRepository` permission). When an org owner
-      creates/transfers the repo: change the one `repository` field, run
-      `dist generate` (release.yml was unchanged by the last run), fix the
-      four README URLs, and re-point `origin`.
-- [ ] **GitHub Actions never runs for `0xchasercat` repos** — this is
-      what blocks the v0.1.0 release. Tag `v0.1.0` (annotated, on
-      `0009cf8`) is pushed and `release.yml` is registered, but no run
-      was ever created. Evidence (2026-10-05, `gh api`):
-      `repos/0xchasercat/surf/actions/runs` → `total_count: 0` after four
-      pushes to `main` plus the tag; `actions/permissions` →
-      `{"enabled":true,"allowed_actions":"all"}`; `actions/workflows` →
-      both `ci` and `Release` `state: active`. The same holds for every
-      other repo on the account: `aeon` (private, 18 workflows, 0 runs)
-      and `butterfly` (public, 1 workflow, 0 runs) — so it is an
-      account-level Actions suspension (billing / verification), not a
-      workflow bug. Resolutions, either one: (a) fix it at
-      github.com/settings/billing (Actions spending limit / payment
-      method), or (b) transfer the repo to `heretic-tech/surf` (where
-      Actions demonstrably runs). Then re-trigger the release with
-      `git push origin :refs/tags/v0.1.0 && git push origin v0.1.0`.
-      Do not `gh release create` by hand — `dist host --steps=create`
-      owns the release.
+- [x] Move the repo to `heretic-tech/surf` (2026-10-05). `repository` in
+      `Cargo.toml`, the two README badges and the `curl | sh` / `irm | iex`
+      one-liners point at `heretic-tech/surf`; `dist generate` left
+      `release.yml` unchanged (the URL is read from `repository` at build
+      time); `origin` is `https://github.com/heretic-tech/surf.git`.
+- [x] History: the personal `0xchasercat` GitHub account was suspended
+      (Actions never created a run for any repo there — `total_count: 0`
+      after four pushes plus the `v0.1.0` tag, with Actions enabled and both
+      workflows `active`). The repo moved to `heretic-tech/surf` on
+      2026-10-05, where Actions runs (first `ci` run on push:
+      `actions/runs/37255565394`). `0xchasercat/surf` is a stale private
+      copy carrying the old `repository` URL and the old `v0.1.0` tag
+      (on `0009cf8`): delete it when/if that account is restored. The local
+      clone keeps it as remote `suspended` with push disabled.
 - [ ] `.github/workflows/release.yml` has never run: the first `v0.1.0`
       tag is the first exercise of the five-target matrix (the
       `aarch64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` builds in
