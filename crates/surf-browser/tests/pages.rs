@@ -14,8 +14,8 @@ use serde_json::json;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use surf_browser::{
-    ActionOptions, BrowserError, Cookie, DialogPolicy, Migration, NewPageOptions, RebindTarget,
-    WaitUntil,
+    ActionOptions, BrowserError, Cookie, DialogPolicy, FrameRef, Migration, NewPageOptions,
+    RebindTarget, WaitUntil,
 };
 
 fn opts() -> ActionOptions {
@@ -326,11 +326,17 @@ async fn auto_wait_and_timeouts() {
         .await
         .unwrap();
 
-    // Appended by a page timer after load: it is absent right after the
-    // navigation settles, and text() waits for attachment rather than
-    // failing. (No wall-clock floor — under a parallel workspace run the
-    // navigation itself can absorb most of the fixture's delay.)
-    assert!(!page.exists("#appeared").await.unwrap());
+    // Appended by a page timer 800 ms after load: it is absent right after
+    // the navigation settles, and text() waits for attachment rather than
+    // failing. The absence check is only meaningful when the first world
+    // (createIsolatedWorld + resolver install) came up well inside those
+    // 800 ms — under a parallel workspace run with a dozen Chromes it may
+    // not, so the check is skipped rather than made flaky.
+    let settled = Instant::now();
+    let present = page.exists("#appeared").await.unwrap();
+    if settled.elapsed() < Duration::from_millis(500) {
+        assert!(!present, "#appeared exists before the fixture's timer");
+    }
     assert_eq!(page.text("#appeared", opts()).await.unwrap(), "I appeared");
 
     // Disabled-then-enabled: click waits; the spinner overlay (gone at
@@ -566,6 +572,167 @@ async fn world_survives_navigation_and_frames_are_separate() {
             .unwrap(),
         json!(["first", "second"])
     );
+
+    b.close().await.unwrap();
+}
+
+/// Frames API: child frames get their own isolated worlds, actions and
+/// readers resolve inside the frame, `frame(FrameRef)` waits for the
+/// iframe and the world is re-created after the frame navigates.
+#[tokio::test]
+async fn child_frames_have_their_own_worlds() {
+    let Some(b) = browser("child_frames_have_their_own_worlds").await else {
+        return;
+    };
+    let fx = Fixture::start().await;
+    let page = b.page(1).await.unwrap();
+    page.goto(&fx.url("/frames.html"), WaitUntil::Load)
+        .await
+        .unwrap();
+
+    let main = page.main_frame();
+    assert!(main.is_main());
+    assert_eq!(main.text("#top", opts()).await.unwrap(), "Top frame");
+    assert!(!main.exists("#child").await.unwrap());
+
+    let frames = page.frames().await.unwrap();
+    assert_eq!(frames.len(), 3, "{frames:?}");
+    assert!(frames[0].is_main());
+    assert_eq!(frames[1].name(), "first");
+    assert_eq!(frames[2].name(), "second");
+    assert_eq!(frames[1].info().parent_id.as_deref(), Some(main.frame_id()));
+
+    let first = page.frame(FrameRef::Name("first".into())).await.unwrap();
+    let second = page.frame(FrameRef::UrlGlob("*?n=2".into())).await.unwrap();
+    let by_index = page.frame(FrameRef::Index(1)).await.unwrap();
+    assert_eq!(second.frame_id(), by_index.frame_id());
+    assert_ne!(first.frame_id(), second.frame_id());
+    assert_eq!(first.text("#child", opts()).await.unwrap(), "child ?n=1");
+    assert_eq!(second.text("#child", opts()).await.unwrap(), "child ?n=2");
+    assert!(first
+        .url()
+        .await
+        .unwrap()
+        .ends_with("/frame-child.html?n=1"));
+    assert_eq!(first.eval("document.title").await.unwrap(), json!("Child"));
+    // Frame worlds are separate from the main world and from each other.
+    let wm = main.world().await.unwrap();
+    let w1 = first.world().await.unwrap();
+    let w2 = second.world().await.unwrap();
+    assert_ne!(wm.context_id, w1.context_id);
+    assert_ne!(w1.context_id, w2.context_id);
+    assert_eq!(first.world().await.unwrap().context_id, w1.context_id);
+
+    // Element handles stay bound to their frame.
+    let el = first.first("#child").await.unwrap().expect("child");
+    assert_eq!(el.frame().frame_id(), first.frame_id());
+    assert_eq!(el.text().await.unwrap(), "child ?n=1");
+
+    // Navigate the child: its world is re-created, the main frame's stays.
+    first
+        .eval("location.href = '/frame-child.html?n=9'")
+        .await
+        .ok();
+    first
+        .wait_text("#child", "child ?n=9", opts())
+        .await
+        .unwrap();
+    let w1b = first.world().await.unwrap();
+    assert_ne!(w1.context_id, w1b.context_id);
+    assert_eq!(main.world().await.unwrap().context_id, wm.context_id);
+
+    // A missing frame times out with the frame list.
+    let err = page.frame(FrameRef::Name("nope".into())).await.unwrap_err();
+    assert!(err.to_string().contains("first"), "{err}");
+
+    b.close().await.unwrap();
+}
+
+/// Shadow DOM piercing (CSS and `text=`), `fill()` on special inputs and
+/// `set_files()` on a file input.
+#[tokio::test]
+async fn shadow_dom_special_fill_and_set_files() {
+    let Some(b) = browser("shadow_dom_special_fill_and_set_files").await else {
+        return;
+    };
+    let fx = Fixture::start().await;
+    let page = b.page(1).await.unwrap();
+    page.goto(&fx.url("/shadow.html"), WaitUntil::Load)
+        .await
+        .unwrap();
+
+    // CSS pierces open shadow roots; light DOM wins; one selector never
+    // crosses a boundary; closed roots are invisible.
+    assert_eq!(page.count(".inner").await.unwrap(), 3);
+    assert!(page.exists("#shadow-btn").await.unwrap());
+    assert!(!page.exists("#host .inner").await.unwrap());
+    assert!(!page.exists(".secret").await.unwrap());
+    assert_eq!(page.text("i.inner", opts()).await.unwrap(), "nested text");
+    page.click("#shadow-btn", opts()).await.unwrap();
+    assert_eq!(page.text("#light", opts()).await.unwrap(), "shadow clicked");
+    // text= walks the composed tree: shadow text, nested roots and slotted
+    // light children each found once.
+    assert_eq!(
+        page.text("text=shadow text", opts()).await.unwrap(),
+        "shadow text"
+    );
+    assert_eq!(
+        page.text("text=nested text", opts()).await.unwrap(),
+        "nested text"
+    );
+    assert_eq!(page.count("text=slotted text").await.unwrap(), 1);
+    assert_eq!(page.count("text=closed text").await.unwrap(), 0);
+
+    // Special inputs get `.value` + events; invalid values are errors.
+    page.fill("#date", "2024-02-29", opts()).await.unwrap();
+    assert_eq!(page.value("#date", opts()).await.unwrap(), "2024-02-29");
+    page.fill("#number", "7", opts()).await.unwrap();
+    assert_eq!(page.value("#number", opts()).await.unwrap(), "7");
+    page.fill("#color", "#ff0000", opts()).await.unwrap();
+    assert_eq!(page.value("#color", opts()).await.unwrap(), "#ff0000");
+    let err = page.fill("#date", "not a date", opts()).await.unwrap_err();
+    assert!(err.to_string().contains("not a valid value"), "{err}");
+    let err = page.fill("#file", "x.txt", opts()).await.unwrap_err();
+    assert!(err.to_string().contains("set_files"), "{err}");
+
+    // set_files: paths must exist; the input fires `change`; an empty
+    // list clears; a non-file input is refused.
+    let dir = std::env::temp_dir().join(format!("surf-set-files-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let a = dir.join("a.txt");
+    let bfile = dir.join("b.bin");
+    std::fs::write(&a, b"hello").unwrap();
+    std::fs::write(&bfile, [0u8; 3]).unwrap();
+    page.set_files("#file", &[&a, &bfile], opts())
+        .await
+        .unwrap();
+    assert_eq!(
+        page.text("#files", opts()).await.unwrap(),
+        "a.txt:5,b.bin:3"
+    );
+    assert_eq!(
+        page.eval("document.getElementById('file').files.length")
+            .await
+            .unwrap(),
+        json!(2)
+    );
+    let el = page.first("#file").await.unwrap().expect("file input");
+    el.set_files(&[], opts()).await.unwrap();
+    assert_eq!(
+        page.eval("document.getElementById('file').files.length")
+            .await
+            .unwrap(),
+        json!(0)
+    );
+    let missing = dir.join("missing.txt");
+    let err = page
+        .set_files("#file", &[&missing], opts())
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("missing.txt"), "{err}");
+    let err = page.set_files("#date", &[&a], opts()).await.unwrap_err();
+    assert!(err.to_string().contains("file"), "{err}");
+    std::fs::remove_dir_all(&dir).ok();
 
     b.close().await.unwrap();
 }

@@ -22,13 +22,14 @@ use crate::util::base64_decode;
 use crate::world::{context_lost, World};
 use serde_json::Value;
 use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use surf_cdp::protocol::{emulation, page, storage, target};
+use surf_cdp::protocol::{emulation, page, runtime, storage, target};
 use surf_cdp::{event, DomainGuard, Event, Session};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
@@ -36,6 +37,15 @@ use tokio::task::JoinHandle;
 /// Slack added to the page timeout for the per-call CDP timeout, so a
 /// Surf-level timeout fires first with a better message.
 const CALL_SLACK: Duration = Duration::from_secs(5);
+
+/// How long the receivers armed by [`Page::mark_action`] are kept when no
+/// `wait_for_navigation` consumes them (a script that clicks and never
+/// waits would otherwise hold them until its next action).
+const ARMED_TTL: Duration = Duration::from_secs(10);
+
+/// Dropped [`Element`](crate::Element) handles are released in batches of
+/// at most this many `Runtime.releaseObject` calls per background task.
+const RELEASE_BATCH: usize = 256;
 
 /// The CDP identity currently behind a page.
 #[derive(Clone, Debug)]
@@ -135,8 +145,8 @@ pub struct Dialog {
 }
 
 /// State shared with the per-page event task (`Send`).
-#[derive(Debug, Default)]
-struct Shared {
+#[derive(Default)]
+pub(crate) struct Shared {
     dialog_policy: Mutex<DialogPolicy>,
     dialogs: Mutex<Vec<Dialog>>,
     /// Bumped on every main-frame navigation; the cached world is only
@@ -144,6 +154,18 @@ struct Shared {
     nav_epoch: AtomicU64,
     /// URL of the last committed main-frame navigation.
     last_url: Mutex<String>,
+    /// Subscriptions taken by the last [`Page::mark_action`]; dropped by
+    /// `wait_for_navigation`, the next action, or the [`ARMED_TTL`] timer.
+    armed: Mutex<Option<Armed>>,
+    /// Generation of the current `armed` entry (the timer only drops its
+    /// own).
+    armed_gen: AtomicU64,
+    /// Per child frame: bumped on every `Page.frameNavigated` for it, so
+    /// the frame's cached world is re-created after it navigates.
+    pub(crate) frame_epochs: Mutex<HashMap<String, u64>>,
+    /// Child frame ids currently attached (`Page.frameAttached` /
+    /// `frameDetached`, seeded from the frame tree) — download attribution.
+    pub(crate) child_frames: Mutex<HashSet<String>>,
 }
 
 /// Navigation subscriptions taken at the start of an action that may
@@ -151,6 +173,8 @@ struct Shared {
 /// moment they are created, so a `wait_for_navigation` that follows the
 /// action still sees a navigation that committed before it was called.
 struct Armed {
+    /// Generation (see `Shared::armed_gen`).
+    gen: u64,
     /// `nav_epoch` when the action started.
     epoch: u64,
     lifecycle: broadcast::Receiver<Event>,
@@ -197,9 +221,11 @@ impl Migration {
 /// Shared page state.
 pub struct PageInner {
     attached: RefCell<Option<Attached>>,
-    /// `(nav_epoch at creation, world)`.
+    /// `(nav_epoch at creation, world)` of the main frame.
     world: RefCell<Option<(u64, World)>>,
-    shared: Arc<Shared>,
+    /// Child-frame worlds by frame id: `(frame epoch at creation, world)`.
+    pub(crate) frame_worlds: RefCell<HashMap<String, (u64, World)>>,
+    pub(crate) shared: Arc<Shared>,
     /// Creation index (1-based) — `page(2)`.
     pub index: usize,
     /// Optional user name — `page("login")`.
@@ -210,13 +236,14 @@ pub struct PageInner {
     credentials: RefCell<Option<Credentials>>,
     /// `block([...])` patterns (Chrome dialect), re-applied on rebind.
     blocked: RefCell<Vec<String>>,
-    /// Subscriptions taken by the last [`mark_action`](Page::mark_action).
-    armed: RefCell<Option<Armed>>,
+    /// `objectId`s of dropped [`Element`](crate::Element)s, released in
+    /// one background batch by the next [`world`](Page::world) call.
+    garbage: RefCell<Vec<String>>,
 }
 
 /// A stable handle to a tab. Cheap to clone; all clones share state.
 #[derive(Clone)]
-pub struct Page(Rc<PageInner>);
+pub struct Page(pub(crate) Rc<PageInner>);
 
 impl std::fmt::Debug for Page {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -241,13 +268,14 @@ impl Page {
         let page = Page(Rc::new(PageInner {
             attached: RefCell::new(None),
             world: RefCell::new(None),
+            frame_worlds: RefCell::new(HashMap::new()),
             shared: Arc::new(Shared::default()),
             index,
             name: RefCell::new(None),
             timeout: Cell::new(timeout),
             credentials: RefCell::new(credentials),
             blocked: RefCell::new(Vec::new()),
-            armed: RefCell::new(None),
+            garbage: RefCell::new(Vec::new()),
         }));
         page.install(backing).await?;
         Ok(page)
@@ -277,13 +305,29 @@ impl Page {
                 .await?;
             Some(guard)
         };
+        // Seed the child-frame set from the current tree; the event task
+        // keeps it current from here on.
+        {
+            let tree = session.send(page::GetFrameTree {}).await?;
+            let mut ids = HashSet::new();
+            collect_child_ids(&tree.frame_tree, &mut ids);
+            *self.0.shared.child_frames.lock().expect("child frames") = ids;
+            self.0
+                .shared
+                .frame_epochs
+                .lock()
+                .expect("frame epochs")
+                .clear();
+        }
         let events = tokio::spawn(page_events(
             session.clone(),
             self.0.shared.clone(),
             backing.frame_id.clone(),
         ));
         *self.0.world.borrow_mut() = None;
-        self.0.armed.borrow_mut().take();
+        self.0.frame_worlds.borrow_mut().clear();
+        self.0.garbage.borrow_mut().clear();
+        self.0.shared.armed.lock().expect("armed").take();
         *self.0.attached.borrow_mut() = Some(Attached {
             backing,
             _page_guard: page_guard,
@@ -364,14 +408,23 @@ impl Page {
             })
     }
 
-    /// The isolated world (created lazily on first use, re-created after
-    /// navigation / rebind).
+    /// The main frame's isolated world (created lazily on first use,
+    /// re-created after navigation / rebind). Re-creating it sweeps the
+    /// `surf` object group of the old world and forgets pending handle
+    /// releases (the old context took its handles with it); re-using it
+    /// flushes the handles of dropped [`Element`](crate::Element)s in one
+    /// background batch instead of one task per handle.
     pub async fn world(&self) -> Result<World, BrowserError> {
         let epoch = self.0.shared.nav_epoch.load(Ordering::SeqCst);
-        if let Some((e, w)) = self.0.world.borrow().as_ref() {
-            if *e == epoch {
-                return Ok(w.clone());
+        let cached = self.0.world.borrow().clone();
+        if let Some((e, w)) = cached {
+            if e == epoch {
+                self.flush_garbage(&w.session);
+                return Ok(w);
             }
+            self.0.garbage.borrow_mut().clear();
+            self.0.frame_worlds.borrow_mut().clear();
+            w.release_all().await;
         }
         let session = self.session()?;
         let frame_id = self.frame_id()?;
@@ -380,9 +433,61 @@ impl Page {
         Ok(w)
     }
 
-    /// Forget the cached world (next use creates a new one).
+    /// Forget the cached worlds (next use creates new ones).
     pub fn invalidate_world(&self) {
         self.0.world.borrow_mut().take();
+        self.0.frame_worlds.borrow_mut().clear();
+    }
+
+    /// Queue a handle for release (an [`Element`](crate::Element) was
+    /// dropped); nothing is sent until the next [`world`](Self::world).
+    pub(crate) fn push_garbage(&self, object_id: String) {
+        self.0.garbage.borrow_mut().push(object_id);
+    }
+
+    /// Handles queued by [`push_garbage`](Self::push_garbage) and not yet
+    /// released.
+    pub fn pending_releases(&self) -> usize {
+        self.0.garbage.borrow().len()
+    }
+
+    /// Release queued handles on a background task (best effort).
+    pub(crate) fn flush_garbage(&self, session: &Session) {
+        let ids = std::mem::take(&mut *self.0.garbage.borrow_mut());
+        if ids.is_empty() || session.connection().is_closed() {
+            return;
+        }
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let session = session.clone();
+        handle.spawn(async move {
+            for chunk in ids.chunks(RELEASE_BATCH) {
+                if session.connection().is_closed() {
+                    return;
+                }
+                let calls = chunk.iter().map(|id| {
+                    session.send(runtime::ReleaseObject {
+                        object_id: id.clone(),
+                    })
+                });
+                let _ = futures::future::join_all(calls).await;
+            }
+        });
+    }
+
+    /// Whether `frame_id` is this page's main frame or one of its child
+    /// frames (download attribution).
+    pub fn owns_frame(&self, frame_id: &str) -> bool {
+        if self.frame_id().is_ok_and(|f| f == frame_id) {
+            return true;
+        }
+        self.0
+            .shared
+            .child_frames
+            .lock()
+            .expect("child frames")
+            .contains(frame_id)
     }
 
     /// Run `f` against the world; if Chrome reports the execution context
@@ -483,12 +588,33 @@ impl Page {
         let Some(backing) = self.backing() else {
             return;
         };
+        let shared = self.0.shared.clone();
+        let gen = shared.armed_gen.fetch_add(1, Ordering::SeqCst) + 1;
         let armed = Armed {
-            epoch: self.0.shared.nav_epoch.load(Ordering::SeqCst),
+            gen,
+            epoch: shared.nav_epoch.load(Ordering::SeqCst),
             lifecycle: backing.session.events("Page.lifecycleEvent"),
             navigated: backing.session.events("Page.frameNavigated"),
         };
-        *self.0.armed.borrow_mut() = Some(armed);
+        *shared.armed.lock().expect("armed") = Some(armed);
+        // Drop the receivers after `ARMED_TTL` unless something replaced
+        // or consumed them, so a script that never waits for the
+        // navigation does not hold two buffering subscriptions.
+        if let Ok(h) = tokio::runtime::Handle::try_current() {
+            h.spawn(async move {
+                tokio::time::sleep(ARMED_TTL).await;
+                let mut slot = shared.armed.lock().expect("armed");
+                if slot.as_ref().is_some_and(|a| a.gen == gen) {
+                    slot.take();
+                }
+            });
+        }
+    }
+
+    /// Whether [`mark_action`](Self::mark_action) receivers are armed
+    /// right now (tests).
+    pub fn is_armed(&self) -> bool {
+        self.0.shared.armed.lock().expect("armed").is_some()
     }
 
     /// Wait for the next main-frame navigation to commit and reach
@@ -502,12 +628,13 @@ impl Page {
     pub async fn wait_for_navigation(&self, wait_until: WaitUntil) -> Result<(), BrowserError> {
         let session = self.session()?;
         let frame_id = self.frame_id()?;
-        let armed = self.0.armed.borrow_mut().take();
+        let armed = self.0.shared.armed.lock().expect("armed").take();
         let (lifecycle, navigated) = match armed {
             Some(Armed {
                 epoch,
                 lifecycle,
                 navigated,
+                ..
             }) => {
                 let now = self.0.shared.nav_epoch.load(Ordering::SeqCst);
                 if now > epoch && wait_until.lifecycle_name().is_none() {
@@ -811,16 +938,29 @@ impl Page {
         Ok(())
     }
 
-    /// PDF bytes (`Page.printToPDF`; headless only — Chrome refuses it in
-    /// headed mode).
+    /// PDF bytes (`Page.printToPDF`; headless only — Chrome answers
+    /// `PrintToPDF is not implemented` in headed mode, surfaced as
+    /// [`BrowserError::HeadlessOnly`]).
     pub async fn pdf_bytes(&self) -> Result<Vec<u8>, BrowserError> {
-        let r = self
+        let r = match self
             .session()?
             .send(page::PrintToPdf {
                 print_background: Some(true),
                 ..Default::default()
             })
-            .await?;
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                let e = BrowserError::from(e);
+                if e.protocol_message_contains("not implemented") {
+                    return Err(BrowserError::HeadlessOnly {
+                        action: "pdf".into(),
+                    });
+                }
+                return Err(e);
+            }
+        };
         base64_decode(&r.data).map_err(BrowserError::Unsupported)
     }
 
@@ -958,8 +1098,9 @@ impl Page {
     /// Drop the backing without talking to Chrome (the browser process is
     /// gone or going away).
     pub(crate) fn forget(&self) {
-        self.0.world.borrow_mut().take();
-        self.0.armed.borrow_mut().take();
+        self.invalidate_world();
+        self.0.garbage.borrow_mut().clear();
+        self.0.shared.armed.lock().expect("armed").take();
         self.0.attached.borrow_mut().take();
     }
 
@@ -968,8 +1109,9 @@ impl Page {
         let Some(attached) = self.0.attached.borrow_mut().take() else {
             return Ok(());
         };
-        self.0.world.borrow_mut().take();
-        self.0.armed.borrow_mut().take();
+        self.invalidate_world();
+        self.0.garbage.borrow_mut().clear();
+        self.0.shared.armed.lock().expect("armed").take();
         let backing = attached.backing.clone();
         drop(attached);
         let root = backing.session.connection().root();
@@ -997,10 +1139,23 @@ const STORAGE_IMPORT: &str = r#"function(data) {
   for (const [k, v] of Object.entries(data.session || {})) sessionStorage.setItem(k, v);
 }"#;
 
-/// Per-page event task: main-frame navigations bump the world epoch;
-/// dialogs are answered per policy. Ends when the session's channels close.
+/// Child frame ids of a `Page.getFrameTree` result (every frame below the
+/// root).
+fn collect_child_ids(tree: &page::FrameTree, out: &mut HashSet<String>) {
+    for child in tree.child_frames.iter().flatten() {
+        out.insert(child.frame.id.clone());
+        collect_child_ids(child, out);
+    }
+}
+
+/// Per-page event task: main-frame navigations bump the world epoch,
+/// child-frame navigations bump that frame's epoch, `frameAttached` /
+/// `frameDetached` keep the child set current; dialogs are answered per
+/// policy. Ends when the session's channels close.
 async fn page_events(session: Session, shared: Arc<Shared>, frame_id: String) {
     let mut navigated = session.events("Page.frameNavigated");
+    let mut attached = session.events("Page.frameAttached");
+    let mut detached = session.events("Page.frameDetached");
     let mut dialogs = session.events("Page.javascriptDialogOpening");
     loop {
         tokio::select! {
@@ -1012,6 +1167,23 @@ async fn page_events(session: Session, shared: Arc<Shared>, frame_id: String) {
                     if let Some(url) = frame["url"].as_str() {
                         *shared.last_url.lock().expect("last_url") = url.to_owned();
                     }
+                } else if let Some(id) = frame["id"].as_str() {
+                    *shared.frame_epochs.lock().expect("frame epochs").entry(id.to_owned()).or_insert(0) += 1;
+                    shared.child_frames.lock().expect("child frames").insert(id.to_owned());
+                }
+            }
+            ev = event::next(&mut attached) => {
+                let Some(ev) = ev else { break };
+                if let Some(id) = ev.params["frameId"].as_str() {
+                    shared.child_frames.lock().expect("child frames").insert(id.to_owned());
+                }
+            }
+            ev = event::next(&mut detached) => {
+                let Some(ev) = ev else { break };
+                if let Some(id) = ev.params["frameId"].as_str() {
+                    shared.child_frames.lock().expect("child frames").remove(id);
+                    // A swapped frame keeps its id; bump so a cached world is not reused.
+                    *shared.frame_epochs.lock().expect("frame epochs").entry(id.to_owned()).or_insert(0) += 1;
                 }
             }
             ev = event::next(&mut dialogs) => {

@@ -80,6 +80,12 @@ pub enum BrowserError {
     /// Feature that is reserved but not available.
     #[error("{0}")]
     Unsupported(String),
+    /// Chrome only implements this in headless mode (`Page.printToPDF`).
+    #[error("{action}() needs a headless browser — Chrome refuses it in a visible window; set `headless: true` in `browser:` (or run without a display)")]
+    HeadlessOnly {
+        /// The action (`pdf`).
+        action: String,
+    },
     /// IO.
     #[error("io: {0}")]
     Io(#[from] std::io::Error),

@@ -67,16 +67,25 @@ commit; the gates in `AGENTS.md` are part of done.
       The CLI REPL wiring is the item under Runtime.
 
 ### Browser
-- [ ] surf-browser `fill()` sets text through select-all +
-      `Input.insertText`; `<input type=date|number|range|color|file>` need
-      value assignment / `DOM.setFileInputFiles` instead (Playwright-style).
-      Add `set_files(sel, paths)` for file inputs.
-- [ ] surf-browser `text=` resolver walks light DOM only (no shadow roots);
-      CSS selectors likewise do not pierce shadow DOM.
-- [ ] Frames API: `frame("name")` / iframe targeting with isolated worlds per
-      frame; `Page.frameAttached` tracking. Today every action resolves in
-      the main frame's world (`World::create(session, frame_id)` already
-      takes any frame id, so child-frame worlds are a registry away).
+- [x] surf-browser `fill()` on `<input type=date | datetime-local | month |
+      time | week | number | range | color>` assigns `.value` in the
+      isolated world + `input` / `change` (a sanitised-away value is an
+      error); a file input is an error pointing at `set_files(sel, paths)`
+      (`DOM.setFileInputFiles{objectId}`; `[]` clears via a `DataTransfer`
+      because Chrome ignores an empty list). `Element::set_files` too.
+      Test `shadow_dom_special_fill_and_set_files`.
+- [x] Shadow DOM: CSS pierces open roots (document first, then every open
+      root in tree order; one selector never crosses a boundary), `text=`
+      walks the composed tree (slots included), the click hit test
+      descends into shadow roots; XPath stays light-DOM, closed roots are
+      invisible. Same test.
+- [x] Frames API: `Page::main_frame()`, `frames()` (`Page.getFrameTree`),
+      `frame(FrameRef::{Name, UrlGlob, Index})` (waits up to the page
+      timeout); every action / reader / wait is `impl Frame` with a
+      per-frame isolated world cached by frame id + navigation epoch
+      (bumped on that frame's `Page.frameNavigated`); `Element::frame()`.
+      Out-of-process iframes are listed but have no reachable world (their
+      own targets; `## Later`). Test `child_frames_have_their_own_worlds`.
 - [ ] `wait_download()` matches downloads by the page's main `frameId`; a
       download started from an iframe is not attributed to the page. Track
       child frame ids when the frames API lands.

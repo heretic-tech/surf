@@ -6,13 +6,41 @@
 //! it. `text=` matches the trimmed `textContent` of the *deepest* element:
 //! exact (case-insensitive) matches win over substring matches; `script`,
 //! `style`, `noscript` and `template` subtrees are ignored.
+//!
+//! **Shadow DOM.** Open shadow roots are pierced without any `>>>`
+//! syntax. CSS selectors are run against the document first and then
+//! against every open shadow root in tree order (a host's root comes
+//! before later hosts'; a nested host's root follows its parent root), so
+//! a light-DOM match always wins over a shadow-DOM one and `all` lists
+//! light-DOM matches first. One selector never crosses a boundary
+//! (`#host .inner` does not match inside the host's shadow tree; `.inner`
+//! does). `text=` walks the *composed* tree: a host's shadow root stands
+//! in for its light children and a `<slot>` for its assigned nodes (or its
+//! fallback content), so a slotted text is found once, where it renders.
+//! XPath stays light-DOM only (the platform API cannot pierce). Closed
+//! shadow roots are invisible to every kind.
 
 /// JavaScript source of the selector resolver: `(kind, sel, all) =>
 /// Element | Element[] | null`. `kind` is `css`, `xpath` or `text`.
 pub const RESOLVER_SOURCE: &str = r#"function(kind, sel, all) {
   const doc = document;
+  const shadowRoots = (root, out) => {
+    const w = doc.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      if (n.shadowRoot) { out.push(n.shadowRoot); shadowRoots(n.shadowRoot, out); }
+    }
+    return out;
+  };
   if (kind === 'css') {
-    return all ? Array.from(doc.querySelectorAll(sel)) : doc.querySelector(sel);
+    if (!all) {
+      const hit = doc.querySelector(sel);
+      if (hit) return hit;
+      for (const r of shadowRoots(doc, [])) { const h = r.querySelector(sel); if (h) return h; }
+      return null;
+    }
+    const out = Array.from(doc.querySelectorAll(sel));
+    for (const r of shadowRoots(doc, [])) for (const e of r.querySelectorAll(sel)) out.push(e);
+    return out;
   }
   if (kind === 'xpath') {
     const r = doc.evaluate(sel, doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
@@ -27,10 +55,15 @@ pub const RESOLVER_SOURCE: &str = r#"function(kind, sel, all) {
     const needle = sel.trim().toLowerCase();
     const skip = new Set(['script', 'style', 'noscript', 'template']);
     const exact = [], contains = [];
+    const childrenOf = (el) => {
+      if (el.shadowRoot) return el.shadowRoot.childNodes;
+      if (el.localName === 'slot') { const a = el.assignedNodes({ flatten: true }); if (a.length) return a; }
+      return el.childNodes;
+    };
     const visit = (el) => {
       if (skip.has(el.localName)) return ['', false];
       let text = '', childMatched = false;
-      for (const n of el.childNodes) {
+      for (const n of childrenOf(el)) {
         if (n.nodeType === 3) text += n.data;
         else if (n.nodeType === 1) {
           const [t, m] = visit(n);

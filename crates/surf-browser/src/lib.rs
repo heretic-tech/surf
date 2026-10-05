@@ -30,11 +30,13 @@
 //!   for the world → runtime channel. **Never `Runtime.enable`.**
 //! - [`selector`]: CSS (default), `text=…`, `xpath=…` / `//…` resolution,
 //!   via a helper installed in the isolated world under a random name.
-//! - [`actions`]: auto-waiting actions as methods on [`Page`] / [`Element`]
-//!   (attached → visible → stable → enabled, up to `timeout`): `click
-//!   dblclick hover type fill press check uncheck select scroll focus text
-//!   html attr value exists count all first wait wait_gone wait_text
-//!   wait_url`.
+//! - [`actions`]: auto-waiting actions as methods on [`Frame`] / [`Page`]
+//!   / [`Element`] (attached → visible → stable → enabled, up to
+//!   `timeout`): `click dblclick hover type fill set_files press check
+//!   uncheck select scroll focus text html attr value exists count all
+//!   first wait wait_gone wait_text wait_url`.
+//! - [`frame`]: `page.frames()` / `page.frame(name | url | index)` —
+//!   child frames with their own isolated worlds and the same surface.
 //! - [`input`]: `Input.dispatchMouseEvent` / `dispatchKeyEvent` /
 //!   `insertText` with coordinates from `DOM.getContentQuads` (no
 //!   `DOM.enable`).
@@ -58,6 +60,7 @@ pub mod cookies;
 pub mod discovery;
 pub mod display;
 pub mod error;
+pub mod frame;
 pub mod input;
 pub mod launch;
 pub mod network;
@@ -73,6 +76,7 @@ pub use cookies::Cookie;
 pub use discovery::{chrome_or_skip, Found};
 pub use display::VirtualDisplay;
 pub use error::BrowserError;
+pub use frame::{Frame, FrameInfo, FrameRef};
 pub use launch::{
     launch, CdpMode, LaunchConfig, LaunchOptions, Launched, ProxySpec, TransportChoice,
 };

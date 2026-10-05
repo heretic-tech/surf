@@ -594,6 +594,7 @@ impl Page {
     // actions.rs — every one takes `ActionOptions { timeout, delay }`
     pub async fn click / dblclick / right_click / hover / focus / scroll_into_view(&self, selector: &str, opts);
     pub async fn type_text / fill(&self, selector: &str, text: &str, opts);
+    pub async fn set_files(&self, selector: &str, paths: &[&Path], opts);           // <input type=file>; [] clears
     pub async fn press(&self, key: &str);  pub async fn press_on(&self, selector: &str, key: &str, opts);
     pub async fn check / uncheck(&self, selector, opts);  pub async fn select(&self, selector, values: &[&str], opts) -> Result<Vec<String>, _>;
     pub async fn scroll_by / scroll_to(&self, x: f64, y: f64);
@@ -601,9 +602,24 @@ impl Page {
     pub async fn exists(&self, selector) -> Result<bool, _>;  pub async fn count(&self, selector) -> Result<usize, _>;   // no wait
     pub async fn all(&self, selector) -> Result<Vec<Element>, _>;  pub async fn first(&self, selector) -> Result<Option<Element>, _>;
     pub async fn wait(&self, selector, opts) -> Result<Element, _>;  pub async fn wait_gone / wait_text / wait_url(…);  pub async fn wait_for(&self, d: Duration);
+    // frame.rs — every action / reader / wait above is `impl Frame`; Page forwards to its main frame
+    pub fn main_frame(&self) -> Frame;                                             // no round trip
+    pub async fn frames(&self) -> Result<Vec<Frame>, _>;                           // Page.getFrameTree: main first, then children depth-first
+    pub async fn frame(&self, which: FrameRef) -> Result<Frame, _>;                // child frames only; waits up to the page timeout
 }
 
-pub struct Element;   // an objectId in the page's isolated world; same actions/readers without re-resolving; `all(sel)` scoped; released on drop
+#[derive(Clone)] pub struct Frame;   // one frame; clones share the page's per-frame world cache
+impl Frame {
+    pub fn page(&self) -> &Page;  pub fn frame_id(&self) -> &str;  pub fn is_main(&self) -> bool;  pub fn name(&self) -> &str;  pub fn info(&self) -> &FrameInfo;  pub fn label(&self) -> String;
+    pub async fn world(&self) -> Result<World, _>;  pub fn invalidate_world(&self);  pub async fn with_world<T>(&self, f) -> Result<T, _>;
+    pub async fn eval(&self, expression: &str) -> Result<Value, _>;  pub async fn eval_fn(&self, src: &str, args: Vec<Value>) -> Result<Value, _>;
+    pub async fn url(&self) -> Result<String, _>;                                   // location.href of the frame's document
+    // + click / fill / set_files / text / all / wait … exactly as on Page
+}
+pub struct FrameInfo { pub id: String, pub parent_id: Option<String>, pub name: String, pub url: String }
+pub enum FrameRef { Name(String), UrlGlob(String) /* anchored glob or `re:` */, Index(usize) /* child position, 0-based */ }
+
+pub struct Element;   // an objectId in its frame's isolated world (`frame()`); same actions/readers without re-resolving; `all(sel)` scoped; released on drop
 
 pub struct World { pub session: Session, pub context_id: i64, pub name: String, pub frame_id: String, pub resolver: String }
 impl World {
@@ -648,6 +664,19 @@ navigation that committed between the action and the wait is still seen
 state is consumed by the wait, replaced by the next action and dropped on
 rebind / close. `url()` reads `location.href` in the isolated world.
 
+**Frames.** Every action, reader and wait is implemented once on
+`Frame`; `Page` forwards to `main_frame()`. A child frame's world is one
+more `Page.createIsolatedWorld{frameId}` cached on the page by frame id
+and tagged with the frame's navigation epoch (the event task bumps it on
+every `Page.frameNavigated` for that frame), so a frame's world is never
+reused across its navigations. `frames()` is one `Page.getFrameTree`;
+`frame(FrameRef)` polls it up to the page timeout and times out with the
+list of child frames seen. Nothing new is enabled: `frameAttached` /
+`frameDetached` / `frameNavigated` ride on `Page`. Out-of-process iframes
+(cross-site with site isolation) are separate targets: they are listed,
+but their world creation fails with Chrome's `No frame for given id
+found`. Navigation helpers stay on the page.
+
 **Worlds.** `page.world()` lazily runs `Page.createIsolatedWorld{frameId,
 worldName: <random 12 chars>, grantUniveralAccess: true}` and installs
 the selector resolver on the world's global object as
@@ -672,19 +701,33 @@ visible: non-empty box and not `visibility: hidden` → stable: same box
 over two animation frames, 50 ms fallback for throttled tabs → enabled:
 not `:disabled` / `aria-disabled`) → `DOM.scrollIntoViewIfNeeded{objectId}`
 → `DOM.getContentQuads{objectId}` → centre of the first quad → an
-`elementFromPoint` hit test (an overlay makes it retry) →
+`elementFromPoint` hit test that descends into open shadow roots
+(an overlay makes it retry) →
 `Input.dispatchMouseEvent` `mouseMoved` / `mousePressed` / `mouseReleased`.
 Timeouts carry `action`, `selector`, `waited_ms` and the last observed
 state (`not found`, `hidden`, `moving`, `disabled`, `covered by <div#x>`).
 Readers wait for attachment only; `exists` / `count` never wait. `type`
 dispatches `keyDown`(with `text`)/`keyUp` per US-layout character and
 `Input.insertText` for anything else, with optional jittered `delay`;
-`fill` selects all and `insertText`s (empty text → `Delete`); `press`
-parses `Shift+Tab` / `Ctrl+a` / `Mod+Enter` into `key`, `code`,
-`windowsVirtualKeyCode`, modifiers (and `commands: ["SelectAll"]` etc. for
-`Meta` shortcuts on macOS). `text=` selectors match the trimmed
-`textContent` of the deepest element, exact (case-insensitive) before
-substring, skipping `script`/`style`.
+`fill` selects all and `insertText`s (empty text → `Delete`) except on
+`<input type=date | datetime-local | month | time | week | number | range
+| color>`, which get `.value` assigned in the isolated world plus `input`
+/ `change` events (a value the browser sanitises away is an error) — and
+`<input type=file>`, which is an error pointing at `set_files`.
+`set_files(sel, paths)` resolves the paths to absolute, requires them to
+exist and sends `DOM.setFileInputFiles{objectId, files}`; an empty list
+assigns `new DataTransfer().files` from the world because Chrome ignores
+an empty `files` (no `DOM.enable` either way). `press` parses `Shift+Tab`
+/ `Ctrl+a` / `Mod+Enter` into `key`, `code`, `windowsVirtualKeyCode`,
+modifiers (and `commands: ["SelectAll"]` etc. for `Meta` shortcuts on
+macOS). `text=` selectors match the trimmed `textContent` of the deepest
+element, exact (case-insensitive) before substring, skipping
+`script`/`style`. **Shadow DOM** is pierced without syntax: CSS runs
+against the document and then every open shadow root in tree order
+(light-DOM match first; one selector never crosses a boundary), `text=`
+walks the composed tree (a host's root stands in for its light children,
+a `<slot>` for its assigned nodes), XPath stays light-DOM, closed roots
+are invisible (`selector.rs`).
 
 **Network (`network.rs`, task 9).** Nothing is on by default; `Network`
 and `Fetch` are ref-counted `DomainGuard`s owned by whoever needs them:

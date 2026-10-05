@@ -1,5 +1,6 @@
-//! Auto-waiting page actions, readers and waits — methods on [`Page`] and
-//! [`Element`].
+//! Auto-waiting page actions, readers and waits — methods on [`Frame`]
+//! (the implementation), [`Page`] (the same surface on the main frame)
+//! and [`Element`].
 //!
 //! Every action resolves its element through the isolated-world resolver
 //! and waits until it is **attached → visible → stable → enabled**,
@@ -18,12 +19,14 @@
 //! an `objectId` without it.
 
 use crate::error::BrowserError;
+use crate::frame::Frame;
 use crate::input::{self, KeyPress, MouseButton};
 use crate::network::UrlPattern;
 use crate::page::Page;
 use crate::selector::Selector;
 use crate::world::{by_value, context_lost, World};
 use serde_json::{json, Value};
+use std::path::Path;
 use std::time::{Duration, Instant};
 use surf_cdp::protocol::dom;
 
@@ -49,11 +52,11 @@ impl ActionOptions {
     }
 }
 
-/// A resolved element handle (`objectId` in the page's isolated world),
+/// A resolved element handle (`objectId` in its frame's isolated world),
 /// as returned by [`Page::all`]. Offers the same actions and readers as
-/// [`Page`] without re-resolving. Valid until the page navigates.
+/// [`Page`] without re-resolving. Valid until the frame navigates.
 pub struct Element {
-    page: Page,
+    frame: Frame,
     world: World,
     object_id: String,
     /// `selector[index]` for error messages.
@@ -70,15 +73,14 @@ impl std::fmt::Debug for Element {
 }
 
 impl Drop for Element {
+    /// Queues the handle for release; the page's next world use sends
+    /// the batch (or the navigation sweep covers it). No task per handle.
     fn drop(&mut self) {
-        let world = self.world.clone();
         let id = std::mem::take(&mut self.object_id);
-        if world.session.connection().is_closed() {
+        if id.is_empty() || self.world.session.connection().is_closed() {
             return;
         }
-        if let Ok(h) = tokio::runtime::Handle::try_current() {
-            h.spawn(async move { world.release(&id).await });
-        }
+        self.frame.page().push_garbage(id);
     }
 }
 
@@ -129,11 +131,23 @@ const READY_CHECK: &str = r#"async function() {
 }"#;
 
 /// `this` = element, `(x, y)` = intended click point: is the element (or
-/// a descendant / ancestor) what `elementFromPoint` returns there?
+/// a descendant / ancestor) what `elementFromPoint` returns there? The hit
+/// test descends into open shadow roots (`document.elementFromPoint`
+/// stops at the host) so an element inside a shadow tree is clickable;
+/// containment is checked on the composed tree.
 const HIT_CHECK: &str = r#"function(x, y) {
-  const hit = document.elementFromPoint(x, y);
+  let hit = document.elementFromPoint(x, y);
+  while (hit && hit.shadowRoot) {
+    const inner = hit.shadowRoot.elementFromPoint(x, y);
+    if (!inner || inner === hit) break;
+    hit = inner;
+  }
   if (!hit) return 'ready';
-  if (hit === this || this.contains(hit) || hit.contains(this)) return 'ready';
+  const composedContains = (a, b) => {
+    for (let n = b; n; n = n.parentNode || n.host) if (n === a) return true;
+    return false;
+  };
+  if (hit === this || composedContains(this, hit) || composedContains(hit, this)) return 'ready';
   const label = hit.localName + (hit.id ? '#' + hit.id : '');
   return 'covered by <' + label + '>';
 }"#;
@@ -155,6 +169,36 @@ const SELECT_ALL: &str = r#"function() {
   sel.addRange(range);
 }"#;
 
+/// `this` = element: the `type` of an `<input>`, else `null`.
+const INPUT_TYPE: &str = r#"function() {
+  return this instanceof HTMLInputElement ? this.type : null;
+}"#;
+
+/// `<input type=…>` kinds whose value cannot be typed: `fill` assigns
+/// `.value` and dispatches `input` / `change` instead (Playwright-style).
+const VALUE_INPUT_TYPES: &[&str] = &[
+    "date",
+    "datetime-local",
+    "month",
+    "time",
+    "week",
+    "number",
+    "range",
+    "color",
+];
+
+/// `this` = input: set `.value`, fail when the browser sanitised it away
+/// (a malformed date, an out-of-range number), then fire the events a
+/// user edit would.
+const SET_VALUE: &str = r#"function(v) {
+  const value = String(v).trim();
+  this.focus();
+  this.value = value;
+  if (this.value !== value) throw new Error('fill(): ' + JSON.stringify(value) + ' is not a valid value for <input type=' + this.type + '>');
+  this.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+  this.dispatchEvent(new Event('change', { bubbles: true }));
+}"#;
+
 const SELECT_OPTIONS: &str = r#"function(values) {
   if (!(this instanceof HTMLSelectElement)) throw new Error('select(): element is <' + this.localName + '>, not <select>');
   const wanted = new Set(values);
@@ -170,11 +214,11 @@ const SELECT_OPTIONS: &str = r#"function(values) {
   return chosen;
 }"#;
 
-impl Page {
+impl Frame {
     // ───────────────────────── internals ─────────────────────────
 
     fn deadline(&self, opts: &ActionOptions) -> (Instant, Duration) {
-        let t = opts.timeout.unwrap_or_else(|| self.timeout());
+        let t = opts.timeout.unwrap_or_else(|| self.page().timeout());
         (Instant::now() + t, t)
     }
 
@@ -238,7 +282,7 @@ impl Page {
         let (deadline, _) = self.deadline(opts);
         // `wait_navigation()` after this action must notice a navigation
         // that commits before it is called.
-        self.mark_action();
+        self.page().mark_action();
         loop {
             let world = self.world().await?;
             let step = async {
@@ -374,6 +418,22 @@ impl Page {
     ) -> Result<(), BrowserError> {
         let (world, id, _, _) = self.wait_ready("fill", target, opts).await?;
         let r = async {
+            let kind = world.call_on(&id, INPUT_TYPE, vec![]).await?;
+            match kind.as_str() {
+                Some("file") => {
+                    return Err(BrowserError::Element {
+                        message: "fill(): <input type=file> takes files, not text — use set_files(selector, [paths])".into(),
+                        selector: target.label(),
+                    });
+                }
+                Some(t) if VALUE_INPUT_TYPES.contains(&t) => {
+                    return world
+                        .call_on(&id, SET_VALUE, vec![json!(text)])
+                        .await
+                        .map(|_| ());
+                }
+                _ => {}
+            }
             world.call_on(&id, SELECT_ALL, vec![]).await?;
             if text.is_empty() {
                 let del = KeyPress {
@@ -384,6 +444,59 @@ impl Page {
             } else {
                 input::insert_text(&world.session, text).await
             }
+        }
+        .await;
+        self.release_if_resolved(&world, target, &id).await;
+        r
+    }
+
+    async fn set_files_target(
+        &self,
+        target: &Target,
+        paths: &[&Path],
+        opts: &ActionOptions,
+    ) -> Result<(), BrowserError> {
+        // `DOM.setFileInputFiles{files: []}` is a no-op in Chrome
+        // (`FileInputType::SetFilesFromPaths` returns early on an empty
+        // list), so clearing assigns an empty `FileList` from the world.
+        const CLEAR_FILES: &str = r#"function() {
+  this.files = new DataTransfer().files;
+  this.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+  this.dispatchEvent(new Event('change', { bubbles: true }));
+}"#;
+        let mut files = Vec::with_capacity(paths.len());
+        for p in paths {
+            let abs = std::path::absolute(p)?;
+            if !abs.is_file() {
+                return Err(BrowserError::Element {
+                    message: format!("set_files(): {} is not a file", abs.display()),
+                    selector: target.label(),
+                });
+            }
+            files.push(abs.to_string_lossy().into_owned());
+        }
+        let (world, id) = self.wait_attached("set_files", target, opts).await?;
+        let r = async {
+            let kind = world.call_on(&id, INPUT_TYPE, vec![]).await?;
+            if kind.as_str() != Some("file") {
+                return Err(BrowserError::Element {
+                    message: "set_files(): element is not an <input type=file>".into(),
+                    selector: target.label(),
+                });
+            }
+            if files.is_empty() {
+                world.call_on(&id, CLEAR_FILES, vec![]).await?;
+                return Ok(());
+            }
+            world
+                .session
+                .send(dom::SetFileInputFiles {
+                    files,
+                    object_id: Some(id.clone()),
+                    ..Default::default()
+                })
+                .await?;
+            Ok(())
         }
         .await;
         self.release_if_resolved(&world, target, &id).await;
@@ -552,7 +665,10 @@ impl Page {
     }
 
     /// Replace the content of the first match with `text` (select all +
-    /// `Input.insertText`; empty text deletes).
+    /// `Input.insertText`; empty text deletes). `<input type=date |
+    /// datetime-local | month | time | week | number | range | color>`
+    /// get `.value` assigned plus `input` / `change` events instead; a
+    /// file input is an error pointing at [`set_files`](Self::set_files).
     pub async fn fill(
         &self,
         selector: &str,
@@ -563,11 +679,24 @@ impl Page {
             .await
     }
 
+    /// Attach `paths` to the first matching `<input type=file>`
+    /// (`DOM.setFileInputFiles{objectId, files}`; paths are made absolute
+    /// and must exist). An empty list clears the selection.
+    pub async fn set_files(
+        &self,
+        selector: &str,
+        paths: &[&Path],
+        opts: ActionOptions,
+    ) -> Result<(), BrowserError> {
+        self.set_files_target(&Target::Selector(Selector::parse(selector)), paths, &opts)
+            .await
+    }
+
     /// Press a key (`Enter`, `Ctrl+a`, …) on whatever has focus.
     pub async fn press(&self, key: &str) -> Result<(), BrowserError> {
         let press = input::parse_combo(key)?;
-        self.mark_action();
-        input::press_key(&self.session()?, &press).await
+        self.page().mark_action();
+        input::press_key(&self.page().session()?, &press).await
     }
 
     /// Focus the first match, then press a key.
@@ -740,7 +869,7 @@ impl Page {
             .into_iter()
             .enumerate()
             .map(|(i, object_id)| Element {
-                page: self.clone(),
+                frame: self.clone(),
                 world: world.clone(),
                 object_id,
                 label: format!("{}[{i}]", sel.source()),
@@ -780,7 +909,7 @@ impl Page {
             match step.await {
                 Ok(Ok(id)) => {
                     return Ok(Element {
-                        page: self.clone(),
+                        frame: self.clone(),
                         world,
                         object_id: id,
                         label: sel.source(),
@@ -904,6 +1033,81 @@ impl Page {
     }
 }
 
+/// The same surface on [`Page`], forwarded to its main frame.
+macro_rules! main_frame_methods {
+    ($( $(#[$doc:meta])* $name:ident ( $($arg:ident : $ty:ty),* ) -> $ret:ty ; )*) => {
+        impl Page {
+            $(
+                $(#[$doc])*
+                pub async fn $name(&self, $($arg: $ty),*) -> $ret {
+                    self.main_frame().$name($($arg),*).await
+                }
+            )*
+        }
+    };
+}
+
+main_frame_methods! {
+    /// Click the first match (left button). See [`Frame::click`].
+    click(selector: &str, opts: ActionOptions) -> Result<(), BrowserError>;
+    /// Double-click the first match.
+    dblclick(selector: &str, opts: ActionOptions) -> Result<(), BrowserError>;
+    /// Right-click the first match.
+    right_click(selector: &str, opts: ActionOptions) -> Result<(), BrowserError>;
+    /// Move the mouse over the first match.
+    hover(selector: &str, opts: ActionOptions) -> Result<(), BrowserError>;
+    /// Focus the first match and type `text` key by key.
+    type_text(selector: &str, text: &str, opts: ActionOptions) -> Result<(), BrowserError>;
+    /// Replace the content of the first match with `text`. See [`Frame::fill`].
+    fill(selector: &str, text: &str, opts: ActionOptions) -> Result<(), BrowserError>;
+    /// Attach files to the first matching `<input type=file>`. See [`Frame::set_files`].
+    set_files(selector: &str, paths: &[&Path], opts: ActionOptions) -> Result<(), BrowserError>;
+    /// Press a key on whatever has focus.
+    press(key: &str) -> Result<(), BrowserError>;
+    /// Focus the first match, then press a key.
+    press_on(selector: &str, key: &str, opts: ActionOptions) -> Result<(), BrowserError>;
+    /// Focus the first match.
+    focus(selector: &str, opts: ActionOptions) -> Result<(), BrowserError>;
+    /// Check a checkbox / radio.
+    check(selector: &str, opts: ActionOptions) -> Result<(), BrowserError>;
+    /// Uncheck a checkbox.
+    uncheck(selector: &str, opts: ActionOptions) -> Result<(), BrowserError>;
+    /// Select option(s) of a `<select>`; returns the values selected.
+    select(selector: &str, values: &[&str], opts: ActionOptions) -> Result<Vec<String>, BrowserError>;
+    /// Scroll the first match into view.
+    scroll_into_view(selector: &str, opts: ActionOptions) -> Result<(), BrowserError>;
+    /// `window.scrollBy(x, y)`.
+    scroll_by(x: f64, y: f64) -> Result<(), BrowserError>;
+    /// `window.scrollTo(x, y)`.
+    scroll_to(x: f64, y: f64) -> Result<(), BrowserError>;
+    /// `innerText` of the first match.
+    text(selector: &str, opts: ActionOptions) -> Result<String, BrowserError>;
+    /// `outerHTML` of the first match.
+    html(selector: &str, opts: ActionOptions) -> Result<String, BrowserError>;
+    /// Attribute value of the first match.
+    attr(selector: &str, name: &str, opts: ActionOptions) -> Result<Option<String>, BrowserError>;
+    /// `value` of the first match.
+    value(selector: &str, opts: ActionOptions) -> Result<String, BrowserError>;
+    /// Whether at least one element matches right now (no wait).
+    exists(selector: &str) -> Result<bool, BrowserError>;
+    /// Number of matches right now (no wait).
+    count(selector: &str) -> Result<usize, BrowserError>;
+    /// Every match right now (no wait) as element handles.
+    all(selector: &str) -> Result<Vec<Element>, BrowserError>;
+    /// The first match right now (no wait), if any.
+    first(selector: &str) -> Result<Option<Element>, BrowserError>;
+    /// Wait until the first match is attached and visible; returns it.
+    wait(selector: &str, opts: ActionOptions) -> Result<Element, BrowserError>;
+    /// Wait until no match is attached and visible.
+    wait_gone(selector: &str, opts: ActionOptions) -> Result<(), BrowserError>;
+    /// Wait until the first match's text contains `needle`.
+    wait_text(selector: &str, needle: &str, opts: ActionOptions) -> Result<(), BrowserError>;
+    /// Wait until the URL matches `pattern` (glob or `re:`).
+    wait_url(pattern: &str, opts: ActionOptions) -> Result<(), BrowserError>;
+    /// Plain sleep (`wait(2s)`).
+    wait_for(d: Duration) -> ();
+}
+
 impl Element {
     /// Wrap a handle the caller already holds (an `objectId` in `world`, on
     /// `page`) — used by the runtime's `on element_appears` observer, which
@@ -911,11 +1115,16 @@ impl Element {
     /// handles to handler bodies. `label` is shown in errors.
     pub fn from_handle(page: Page, world: World, object_id: String, label: String) -> Element {
         Element {
-            page,
+            frame: page.main_frame(),
             world,
             object_id,
             label,
         }
+    }
+
+    /// The frame the element lives in.
+    pub fn frame(&self) -> &Frame {
+        &self.frame
     }
 
     /// `selector[index]`.
@@ -932,48 +1141,59 @@ impl Element {
 
     /// Click (auto-waits for visible / stable / enabled).
     pub async fn click(&self, opts: ActionOptions) -> Result<(), BrowserError> {
-        self.page
+        self.frame
             .click_target("click", &self.target(), MouseButton::Left, 1, &opts)
             .await
     }
 
     /// Double-click.
     pub async fn dblclick(&self, opts: ActionOptions) -> Result<(), BrowserError> {
-        self.page
+        self.frame
             .click_target("dblclick", &self.target(), MouseButton::Left, 2, &opts)
             .await
     }
 
     /// Hover.
     pub async fn hover(&self, opts: ActionOptions) -> Result<(), BrowserError> {
-        self.page.hover_target(&self.target(), &opts).await
+        self.frame.hover_target(&self.target(), &opts).await
     }
 
     /// Type key by key.
     pub async fn type_text(&self, text: &str, opts: ActionOptions) -> Result<(), BrowserError> {
-        self.page.type_target(&self.target(), text, &opts).await
+        self.frame.type_target(&self.target(), text, &opts).await
     }
 
     /// Replace content.
     pub async fn fill(&self, text: &str, opts: ActionOptions) -> Result<(), BrowserError> {
-        self.page.fill_target(&self.target(), text, &opts).await
+        self.frame.fill_target(&self.target(), text, &opts).await
+    }
+
+    /// Attach files to a file input.
+    pub async fn set_files(
+        &self,
+        paths: &[&Path],
+        opts: ActionOptions,
+    ) -> Result<(), BrowserError> {
+        self.frame
+            .set_files_target(&self.target(), paths, &opts)
+            .await
     }
 
     /// Focus then press a key.
     pub async fn press(&self, key: &str, opts: ActionOptions) -> Result<(), BrowserError> {
-        self.page.press_target(&self.target(), key, &opts).await
+        self.frame.press_target(&self.target(), key, &opts).await
     }
 
     /// Check.
     pub async fn check(&self, opts: ActionOptions) -> Result<(), BrowserError> {
-        self.page
+        self.frame
             .set_checked_target(&self.target(), true, &opts)
             .await
     }
 
     /// Uncheck.
     pub async fn uncheck(&self, opts: ActionOptions) -> Result<(), BrowserError> {
-        self.page
+        self.frame
             .set_checked_target(&self.target(), false, &opts)
             .await
     }
@@ -984,12 +1204,14 @@ impl Element {
         values: &[&str],
         opts: ActionOptions,
     ) -> Result<Vec<String>, BrowserError> {
-        self.page.select_target(&self.target(), values, &opts).await
+        self.frame
+            .select_target(&self.target(), values, &opts)
+            .await
     }
 
     /// Scroll into view.
     pub async fn scroll_into_view(&self) -> Result<(), BrowserError> {
-        self.page
+        self.frame
             .scroll_target(&self.target(), &ActionOptions::default())
             .await
     }
@@ -1111,7 +1333,7 @@ impl Element {
         Ok(indexed
             .into_iter()
             .map(|(i, object_id)| Element {
-                page: self.page.clone(),
+                frame: self.frame.clone(),
                 world: self.world.clone(),
                 object_id,
                 label: format!("{} {}[{i}]", self.label, sel.source()),
