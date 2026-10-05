@@ -1,0 +1,10 @@
+text,password,checkbox,radio,radio
+{"a":1,"b":[1,2,"x"],"c":null}
+13
+5 {"text":1,"password":1,"checkbox":1,"radio":2}
+text input: username
+["USERNAME","PASSWORD","AGREE","R1","R2"]
+item 1
+item 2
+item k
+caught: variable `price` used before assignment

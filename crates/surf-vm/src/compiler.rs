@@ -51,10 +51,23 @@ impl std::fmt::Display for CompileError {
 
 impl std::error::Error for CompileError {}
 
+/// Knobs for [`compile_with_options`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CompileOptions {
+    /// Top-level assignments become host globals instead of `<main>`
+    /// locals: `x = 1` emits `Op::SetGlobal` (→ [`crate::Host::set_global`])
+    /// and every read of `x` goes through `Op::GetGlobal` (→
+    /// [`crate::Host::resolve_global`]). This is how the REPL keeps
+    /// variables across lines. Nested functions still get ordinary locals;
+    /// a nested function that assigns a name the top level also assigned
+    /// shadows the global rather than updating it. Default off.
+    pub top_level_globals: bool,
+}
+
 /// Compile a parsed program. Without the source text, `line` in caught
 /// error values is `nil`; prefer [`compile_with_source`].
 pub fn compile(name: &str, program: &Program) -> Result<CompiledProgram, CompileError> {
-    Compiler::new(Rc::from(Vec::new())).program(name, program)
+    compile_with_options(name, None, program, CompileOptions::default())
 }
 
 /// Compile a parsed program, keeping a line table so runtime errors can
@@ -64,13 +77,27 @@ pub fn compile_with_source(
     source: &str,
     program: &Program,
 ) -> Result<CompiledProgram, CompileError> {
-    let mut starts = vec![0u32];
-    for (i, b) in source.bytes().enumerate() {
-        if b == b'\n' {
-            starts.push(i as u32 + 1);
+    compile_with_options(name, Some(source), program, CompileOptions::default())
+}
+
+/// Compile with explicit [`CompileOptions`]; `source` (when given) feeds
+/// the line table.
+pub fn compile_with_options(
+    name: &str,
+    source: Option<&str>,
+    program: &Program,
+    options: CompileOptions,
+) -> Result<CompiledProgram, CompileError> {
+    let mut starts = Vec::new();
+    if let Some(source) = source {
+        starts.push(0u32);
+        for (i, b) in source.bytes().enumerate() {
+            if b == b'\n' {
+                starts.push(i as u32 + 1);
+            }
         }
     }
-    Compiler::new(Rc::from(starts)).program(name, program)
+    Compiler::new(Rc::from(starts), options).program(name, program)
 }
 
 type Res<T = ()> = Result<T, CompileError>;
@@ -118,14 +145,22 @@ struct FnState {
 struct Compiler {
     fns: Vec<FnState>,
     line_starts: Rc<[u32]>,
+    options: CompileOptions,
 }
 
 impl Compiler {
-    fn new(line_starts: Rc<[u32]>) -> Self {
+    fn new(line_starts: Rc<[u32]>, options: CompileOptions) -> Self {
         Self {
             fns: Vec::new(),
             line_starts,
+            options,
         }
+    }
+
+    /// Assignments in the function being compiled go to host globals
+    /// (`CompileOptions::top_level_globals` and we are in `<main>`).
+    fn globals_here(&self) -> bool {
+        self.options.top_level_globals && self.fns.len() == 1
     }
 
     // ----- program ---------------------------------------------------------
@@ -370,6 +405,9 @@ impl Compiler {
     /// to a variable of an enclosing function — then assignment updates the
     /// captured variable instead of shadowing it).
     fn declare_assigned(&mut self, names: &[String]) {
+        if self.globals_here() {
+            return;
+        }
         for n in names {
             let idx = self.fns.len() - 1;
             if self.fns[idx].locals.iter().any(|l| &**l == n.as_str()) {
@@ -393,13 +431,15 @@ impl Compiler {
     }
 
     fn finish(&self, state: FnState) -> Rc<Function> {
+        let mut chunk = state.chunk;
+        chunk.local_names = state.locals.clone();
         Rc::new(Function {
             name: state.name,
             params: state.params,
             has_default: state.has_default,
             locals: state.locals.len() as u32,
             upvalues: state.upvalues.iter().map(|(d, _)| *d).collect(),
-            chunk: state.chunk,
+            chunk,
             span: state.span,
             line_starts: self.line_starts.clone(),
         })
@@ -543,6 +583,9 @@ impl Compiler {
                 self.emit(Op::Pop, span);
             }
             StmtKind::Assign { target, value } => self.assign(target, value, span)?,
+            StmtKind::CompoundAssign { target, op, value } => {
+                self.compound_assign(target, *op, value, span)?
+            }
             StmtKind::If {
                 branches,
                 else_block,
@@ -779,8 +822,48 @@ impl Compiler {
         Ok(())
     }
 
+    /// `target op= value`: the target's receiver / index is evaluated once.
+    fn compound_assign(&mut self, target: &Expr, op: BinaryOp, value: &Expr, span: Span) -> Res {
+        match &target.kind {
+            ExprKind::Ident(_) => {
+                self.expr(target)?;
+                self.expr(value)?;
+                self.emit(Op::Binary(op), span);
+                let ExprKind::Ident(id) = &target.kind else {
+                    unreachable!()
+                };
+                self.set_var(&id.name, id.span);
+            }
+            ExprKind::Field { receiver, name } => {
+                self.expr(receiver)?;
+                self.emit(Op::Dup, span);
+                let n = self.name_const(&name.name);
+                self.emit(Op::GetField(n), target.span);
+                self.expr(value)?;
+                self.emit(Op::Binary(op), span);
+                self.emit(Op::SetField(n), span);
+            }
+            ExprKind::Index { receiver, index } => {
+                self.expr(receiver)?;
+                self.expr(index)?;
+                self.emit(Op::Dup2, span);
+                self.emit(Op::GetIndex, target.span);
+                self.expr(value)?;
+                self.emit(Op::Binary(op), span);
+                self.emit(Op::SetIndex, span);
+            }
+            _ => {
+                return Err(CompileError::new(
+                    "cannot assign to this expression (expected a name, `x.field` or `x[index]`)",
+                    target.span,
+                ))
+            }
+        }
+        Ok(())
+    }
+
     /// Pop the top of stack into variable `name` (creating a local if the
-    /// name is unknown).
+    /// name is unknown, or a host global under `top_level_globals`).
     fn set_var(&mut self, name: &str, span: Span) {
         match self.resolve(name) {
             Var::Local(i) => {
@@ -788,6 +871,10 @@ impl Compiler {
             }
             Var::Upvalue(i) => {
                 self.emit(Op::SetUpvalue(i), span);
+            }
+            Var::Global if self.globals_here() => {
+                let c = self.name_const(name);
+                self.emit(Op::SetGlobal(c), span);
             }
             Var::Global => {
                 let i = self.declare_local(name);
@@ -958,25 +1045,31 @@ impl Compiler {
                 ExprKind::Call { callee, args } => {
                     let name = match &callee.kind {
                         ExprKind::Ident(id) if matches!(self.resolve(&id.name), Var::Global) => {
-                            id.name.clone()
+                            Some(id.name.clone())
                         }
-                        _ => {
-                            return Err(CompileError::new(
-                                "`spawn` needs a named fn, task or actor (`spawn worker(1)`) or a method call",
-                                callee.span,
-                            ))
-                        }
+                        _ => None,
                     };
-                    let (positional, kwargs) = self.args(args)?;
-                    let n = self.name_const(&name);
-                    self.emit(
-                        Op::Spawn {
-                            name: n,
-                            positional,
-                            kwargs,
-                        },
-                        span,
-                    );
+                    match name {
+                        Some(name) => {
+                            let (positional, kwargs) = self.args(args)?;
+                            let n = self.name_const(&name);
+                            self.emit(
+                                Op::Spawn {
+                                    name: n,
+                                    positional,
+                                    kwargs,
+                                },
+                                span,
+                            );
+                        }
+                        None => {
+                            // A closure in a local / upvalue, or any other
+                            // callable expression: the host spawns the value.
+                            self.expr(callee)?;
+                            let (positional, kwargs) = self.args(args)?;
+                            self.emit(Op::SpawnValue { positional, kwargs }, span);
+                        }
+                    }
                 }
                 ExprKind::Method {
                     receiver,
@@ -1067,7 +1160,7 @@ fn collect_assigned(s: &Stmt, out: &mut Vec<String>) {
         }
     };
     match &s.kind {
-        StmtKind::Assign { target, .. } => {
+        StmtKind::Assign { target, .. } | StmtKind::CompoundAssign { target, .. } => {
             if let ExprKind::Ident(id) = &target.kind {
                 add(&id.name);
             }

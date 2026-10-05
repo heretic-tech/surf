@@ -18,38 +18,53 @@ action ships with an e2e script and a `docs/language.md` entry in the same
 commit; the gates in `AGENTS.md` are part of done.
 
 ### Language / VM
-- [ ] Compound assignment (`+=`, `-=`, `*=`, `/=`) on names, fields and
-      index targets.
-- [ ] String methods as methods (`s.upper()`), and list / map methods
+- [x] Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`) on names, fields
+      and index targets (`StmtKind::CompoundAssign`; receiver / index
+      evaluated once via `Op::Dup` / `Op::Dup2`; fixture
+      `compound_assign.surf`, snapshot `stmt_compound_assign`).
+- [x] String methods as methods (`s.upper()`), and list / map methods
       likewise (`xs.len()`), next to the free-function forms that exist
-      today.
-- [ ] surf-syntax: a statement that starts with a list literal
-      (`[1, 2].each(f)`) fails to parse (`expected `]`, found `,``); the
-      statement parser treats a leading `[` as something else. Assign to a
-      name first as a workaround. Same for a leading map literal
-      (`{…}.keys()`).
-- [ ] surf-vm: `spawn` of a non-global callee (`f = fn(): …; spawn f()`) is
-      a compile error; only `spawn name(…)` (→ `Host::spawn`) and
-      `spawn recv.m(…)` (→ `Host::spawn_method`) exist. Add a
-      `Host::spawn_value` if scripts need it. (The runtime side is the
-      `spawn_value` wiring item under Runtime.)
-- [ ] surf-vm: reads of a function-scoped variable before its first
-      assignment yield `nil` (the pre-scan allocates the slot); consider an
-      "unassigned" marker to report `used before assignment` instead.
-- [ ] Raw strings `r"…"` (no escapes; for regexes, Windows paths and the
-      JS handed to `eval`).
-- [ ] surf-syntax: block lambdas inside brackets (`apply(fn(x):` + indented
-      body as an argument). Newlines are suppressed inside `(…)`, so the
-      lexer cannot see the block; needs layout-aware bracket handling.
-      Attempt it; if the layout rule gets ugly, record why here and keep
-      the one-line form.
-- [ ] surf-vm: `now()` and `random()` seed from `std::time::SystemTime`
-      directly (compiles on wasm32 but panics there at runtime); route
-      through `Host::now` / `Host::random_seed` (needed before the v0.5
-      wasm build lands).
-- [ ] surf-vm: a hook for "top-level assignments become host globals"
-      (or the REPL re-declaring them through `Host::resolve_global`) — the
-      VM half of the REPL persistence item under Runtime.
+      today. Already true since v0.1 (`stdlib::forward` makes every free
+      function call the method); fixture `methods.surf` pins both forms to
+      one implementation.
+- [x] surf-syntax: a statement that starts with a list literal
+      (`[1, 2].each(f)`) fails to parse. Root cause: after a *block lambda*
+      (`f = fn(x):` + body) the postfix / infix loop kept going, so the
+      next line's `[` indexed the lambda (and `(…)` called it, `-x`
+      subtracted). A block lambda now ends its expression (snapshot
+      `stmt_after_block_lambda`).
+- [x] surf-vm: `spawn` of a non-global callee (`f = fn(): …; spawn f()`) →
+      `Op::SpawnValue` → `Host::spawn_value(vm, callee, args)` (default
+      errors). The runtime wiring is the item under Runtime; fixture
+      `spawn_value.surf`.
+- [x] surf-vm: reads of a function-scoped variable before its first
+      assignment are `variable `x` used before assignment` (an unset slot
+      marker, `Slot::Unset`; names in `Chunk::local_names`). A closure that
+      captures an unset local boxes `nil` (documented). Fixture
+      `unassigned.surf`, `docs/language.md` § 3.1. **Runtime batch: run the
+      e2e suite** — a script that read a branch-only variable as `nil`
+      now errors and needs `x = nil` first.
+- [x] Raw strings `r"…"` (no escapes, no interpolation, single line, no
+      `"` inside). `docs/language.md` § 1.6; fixture `raw_strings.surf`.
+- [x] surf-syntax: block lambdas inside brackets. Layout rule (lexer): a
+      line inside brackets ending in `):` followed by a deeper-indented
+      line opens a layout block (`NEWLINE INDENT … DEDENT`) that stays live
+      at exactly that bracket depth, and closes on the first line indented
+      at or below the header or when the holding bracket closes on the
+      block's last line (`NEWLINE DEDENT` are emitted before the `)`).
+      Only `):` opens a block, so `key:` map entries and keyword arguments
+      are untouched; all 41 `.surf` files in the repo lex identically.
+      Fixture `block_lambda_args.surf`, snapshot
+      `expr_block_lambda_in_brackets`.
+- [x] surf-vm: `now()` / `random()` route through `Host::now() -> f64` /
+      `Host::random_seed() -> u64` (defaults use `std::time`; the wasm host
+      overrides). The RNG seed no longer mixes the thread-local's address,
+      so a fixed host seed is reproducible across threads.
+- [x] surf-vm: `CompileOptions { top_level_globals }` +
+      `compile_with_options`: top-level assignments emit `Op::SetGlobal` →
+      `Host::set_global(name, value)` (default errors) and reads go through
+      `Host::resolve_global`. Test `top_level_globals_persist_across_programs`.
+      The CLI REPL wiring is the item under Runtime.
 
 ### Browser
 - [ ] surf-browser `fill()` sets text through select-all +
@@ -106,9 +121,11 @@ commit; the gates in `AGENTS.md` are part of done.
       cancels the items (drop guard), but a task's *spawned* children are
       not cancelled with it (no parent/child tree beyond supervisors).
       Decide whether `spawn` inside a task should be structured.
-- [ ] Wire `Host::spawn_value` (Language / VM above) through the runtime's
-      task machinery so a closure value spawns like a named task (handle,
-      `cancel`, join, private page).
+- [ ] Wire `Host::spawn_value(vm, callee: Value, args)` (Language / VM
+      above; default errors) through the runtime's task machinery so a
+      closure value spawns like a named task (handle, `cancel`, join,
+      private page). Until then `spawn f()` on a local closure is the
+      runtime error `spawn of a fn value is not supported by this host`.
 - [ ] A joined task's error is a copy (`tasks::copy_error`): message, span,
       selector and CDP method survive, the original is the cause, but
       `is_no_browser` (CLI exit 3) only inspects the direct cause — a
@@ -139,10 +156,13 @@ commit; the gates in `AGENTS.md` are part of done.
       all (`observed` is per page) — restart the observer with the new
       handler set if the REPL needs it.
 - [ ] `surf repl`: top-level variables do not persist between lines (each
-      chunk compiles to its own `<main>` whose locals die with it). Needs a
-      VM hook for "top-level assignments become host globals" (or the REPL
-      re-declaring them through `Host::resolve_global`) — the Language / VM
-      item above; the REPL half is here.
+      chunk compiles to its own `<main>` whose locals die with it). The VM
+      hook landed (Language / VM above): compile each line with
+      `surf_vm::compile_with_options(name, Some(src), &program,
+      CompileOptions { top_level_globals: true })`, implement
+      `Host::set_global(name, value)` on the runtime host (a
+      `RefCell<IndexMap>` consulted first by `resolve_global`), and keep
+      the `Globals` / host across lines.
 - [ ] `docs/language.md` §0 cheatsheet is hand-maintained; a `surf
       help <action>` or a generated list from `methods.rs::PAGE_METHODS`
       would keep it from drifting. Ship `surf help` and a drift test that

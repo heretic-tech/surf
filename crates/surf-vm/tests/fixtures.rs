@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 use surf_vm::{
-    format_duration, Args, Closure, Declaration, FsOp, Host, NativeObject, Prop, RuntimeError,
-    Value, Vm,
+    format_duration, Args, Closure, CompileOptions, Declaration, FsOp, Host, NativeObject, Prop,
+    RuntimeError, Value, Vm,
 };
 
 type TaskDecl = (Rc<Closure>, IndexMap<Rc<str>, Prop>);
@@ -24,6 +24,8 @@ struct TestHost {
     tasks: RefCell<HashMap<String, TaskDecl>>,
     actors: RefCell<HashMap<String, Rc<Closure>>>,
     files: RefCell<HashMap<String, String>>,
+    /// Host globals written by `Op::SetGlobal` (REPL mode).
+    globals: RefCell<HashMap<String, Value>>,
 }
 
 impl TestHost {
@@ -163,7 +165,15 @@ impl Host for TestHost {
     }
 
     fn resolve_global(&self, name: &str) -> Option<Value> {
+        if let Some(v) = self.globals.borrow().get(name) {
+            return Some(v.clone());
+        }
         self.fns.borrow().get(name).cloned().map(Value::Fn)
+    }
+
+    fn set_global(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
+        self.globals.borrow_mut().insert(name.to_string(), value);
+        Ok(())
     }
 
     fn call_global<'a>(
@@ -218,6 +228,19 @@ impl Host for TestHost {
             } else {
                 return Err(RuntimeError::new(format!("cannot spawn unknown `{name}`")));
             };
+            Ok(Value::native(Handle { result }))
+        })
+    }
+
+    fn spawn_value<'a>(
+        &'a self,
+        vm: &'a mut Vm,
+        callee: Value,
+        args: Args,
+    ) -> LocalBoxFuture<'a, Result<Value, RuntimeError>> {
+        Box::pin(async move {
+            self.line(format!("[spawn value] {}", callee.type_name()));
+            let result = vm.call_value(callee, args).await?;
             Ok(Value::native(Handle { result }))
         })
     }
@@ -310,6 +333,18 @@ impl Host for TestHost {
             "SURF_POOL" => Some("wss://pool.example".into()),
             _ => None,
         }
+    }
+
+    /// A frozen clock so `now()` is reproducible in fixtures.
+    fn now(&self) -> f64 {
+        1_700_000_000_001.5
+    }
+
+    /// A fixed seed so `random()` is reproducible in fixtures. The
+    /// generator state is thread-local and seeded once; every fixture runs
+    /// on its own test thread.
+    fn random_seed(&self) -> u64 {
+        0x5EED_5EED_5EED_5EED
     }
 }
 
@@ -481,6 +516,75 @@ fn break_outside_loop_is_a_compile_error() {
     assert_eq!(err.message, "`break` outside a loop");
     let rendered = err.into_diagnostics("x.surf").render(source, false);
     assert!(rendered.contains("break"), "{rendered}");
+}
+
+/// `CompileOptions::top_level_globals`: top-level assignments go to
+/// `Host::set_global` and come back through `Host::resolve_global`, so a
+/// REPL can run one line per program and keep its variables.
+#[test]
+fn top_level_globals_persist_across_programs() {
+    let host = Rc::new(TestHost::default());
+    let globals = Rc::new(surf_vm::Globals::stdlib());
+    let opts = CompileOptions {
+        top_level_globals: true,
+    };
+    let lines = [
+        "xs = [1, 2]\n",
+        "xs.push(3)\nn = len(xs)\n",
+        "n += 1\n",
+        "fn bump():\n    return n + 10\n",
+        "print(xs, n, bump(), n)\n",
+    ];
+    for (i, line) in lines.iter().enumerate() {
+        let name = format!("repl:{i}");
+        let program = surf_syntax::parse(&name, line).unwrap();
+        let compiled = surf_vm::compile_with_options(&name, Some(line), &program, opts).unwrap();
+        let mut vm = Vm::new(host.clone(), globals.clone());
+        futures::executor::block_on(vm.run(&compiled)).unwrap();
+    }
+    assert_eq!(
+        host.out.borrow().as_slice(),
+        ["[declare] fn bump()", "[1,2,3] 4 14 4"]
+    );
+    assert!(host
+        .globals
+        .borrow()
+        .get("n")
+        .is_some_and(|v| v.equals(&Value::Int(4))));
+}
+
+/// Without the option a top-level assignment is a `<main>` local and the
+/// host's global store is never touched.
+#[test]
+fn top_level_globals_off_by_default() {
+    let source = "x = 1\nprint(x)\n";
+    let program = surf_syntax::parse("x.surf", source).unwrap();
+    let compiled = surf_vm::compile("x.surf", &program).unwrap();
+    let host = Rc::new(TestHost::default());
+    let mut vm = Vm::new(host.clone(), Rc::new(surf_vm::Globals::stdlib()));
+    futures::executor::block_on(vm.run(&compiled)).unwrap();
+    assert!(host.globals.borrow().is_empty());
+    assert_eq!(host.out.borrow().as_slice(), ["1"]);
+}
+
+/// `random()` draws its seed from `Host::random_seed` once per thread: two
+/// threads with the same seed produce the same sequence.
+#[test]
+fn random_is_seeded_by_the_host() {
+    fn run() -> Vec<String> {
+        let source = "print(random(), random(100), random(5, 9), now())\n";
+        let program = surf_syntax::parse("x.surf", source).unwrap();
+        let compiled = surf_vm::compile("x.surf", &program).unwrap();
+        let host = Rc::new(TestHost::default());
+        let mut vm = Vm::new(host.clone(), Rc::new(surf_vm::Globals::stdlib()));
+        futures::executor::block_on(vm.run(&compiled)).unwrap();
+        let out = host.out.borrow().clone();
+        out
+    }
+    let a = std::thread::spawn(run).join().unwrap();
+    let b = std::thread::spawn(run).join().unwrap();
+    assert_eq!(a, b);
+    assert!(a[0].ends_with(" 1700000000001"), "{a:?}");
 }
 
 /// Runtime errors render through `surf_syntax::Diagnostic` with selector

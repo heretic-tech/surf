@@ -1,0 +1,49 @@
+# Reading a function-scoped variable before its first assignment is an
+# error, not nil — the pre-scan reserves the slot but marks it unset.
+fn early():
+    print(later)
+    later = 1
+
+try:
+    early()
+catch e:
+    print("caught:", e.message)
+
+# Only some paths assign: the read is an error on the others.
+fn maybe(flag):
+    if flag:
+        v = "set"
+    return v
+
+print(maybe(true))
+try:
+    maybe(false)
+catch e:
+    print("caught:", e.message)
+
+# Start a variable empty on purpose with `= nil`.
+fn safe(flag):
+    v = nil
+    if flag:
+        v = "set"
+    return v
+print(safe(false))
+
+# A closure that captures a variable before it is assigned sees nil until
+# the assignment happens (the cell is shared), then the value.
+fn capture():
+    get = fn(): x
+    print(get())
+    x = 7
+    print(get())
+capture()
+
+# Parameters are always set, defaults included.
+fn params(a, b: 2):
+    return a + b
+print(params(1))
+
+# The same rule at the top level: the final read is the fatal error.
+if false:
+    top = 1
+print(top)

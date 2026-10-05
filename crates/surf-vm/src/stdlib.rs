@@ -217,15 +217,13 @@ thread_local! {
     static RNG: Cell<u64> = const { Cell::new(0) };
 }
 
-fn next_random() -> u64 {
+/// xorshift64* over a thread-local state, seeded on first use from
+/// [`crate::Host::random_seed`].
+fn next_random(vm: &Vm) -> u64 {
     RNG.with(|c| {
         let mut x = c.get();
         if x == 0 {
-            let t = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos() as u64)
-                .unwrap_or(0x9E37_79B9_7F4A_7C15);
-            x = t ^ (c as *const Cell<u64> as u64) ^ 0x2545_F491_4F6C_DD1D;
+            x = vm.host().random_seed() ^ 0x2545_F491_4F6C_DD1D;
             if x == 0 {
                 x = 0x9E37_79B9_7F4A_7C15;
             }
@@ -320,30 +318,30 @@ fn register_stdlib(g: &Globals) {
         };
         Ok(Value::native(Range { start, end }))
     });
-    pure(g, "now", |_| {
-        let ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-        Ok(Value::Int(ms))
+    reg(g, "now", |vm, _args| {
+        Box::pin(async move { Ok(Value::Int(vm.host().now() as i64)) })
     });
-    pure(g, "random", |args| match (args.get(0), args.get(1)) {
-        (None, _) => Ok(Value::Float(
-            (next_random() >> 11) as f64 / (1u64 << 53) as f64,
-        )),
-        (Some(Value::Int(n)), None) => {
-            if *n <= 0 {
-                return Err(RuntimeError::new("random(n): n must be positive"));
+    reg(g, "random", |vm, args| {
+        Box::pin(async move {
+            match (args.get(0), args.get(1)) {
+                (None, _) => Ok(Value::Float(
+                    (next_random(vm) >> 11) as f64 / (1u64 << 53) as f64,
+                )),
+                (Some(Value::Int(n)), None) => {
+                    if *n <= 0 {
+                        return Err(RuntimeError::new("random(n): n must be positive"));
+                    }
+                    Ok(Value::Int((next_random(vm) % *n as u64) as i64))
+                }
+                (Some(Value::Int(a)), Some(Value::Int(b))) => {
+                    if b <= a {
+                        return Err(RuntimeError::new("random(a, b): b must be greater than a"));
+                    }
+                    Ok(Value::Int(a + (next_random(vm) % (b - a) as u64) as i64))
+                }
+                _ => Err(RuntimeError::new("random: expected zero, one or two ints")),
             }
-            Ok(Value::Int((next_random() % *n as u64) as i64))
-        }
-        (Some(Value::Int(a)), Some(Value::Int(b))) => {
-            if b <= a {
-                return Err(RuntimeError::new("random(a, b): b must be greater than a"));
-            }
-            Ok(Value::Int(a + (next_random() % (b - a) as u64) as i64))
-        }
-        _ => Err(RuntimeError::new("random: expected zero, one or two ints")),
+        })
     });
     pure(g, "fail", |args| {
         args.check_kwargs("fail", &["selector", "cdp_method"])?;

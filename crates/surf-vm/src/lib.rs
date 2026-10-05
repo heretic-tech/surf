@@ -36,7 +36,9 @@ pub mod vm;
 
 pub use bytecode::{Chunk, CompiledProgram, DeclKind, Function, Op, UpvalueDesc};
 pub use cancel::CancelToken;
-pub use compiler::{compile, compile_with_source, CompileError};
+pub use compiler::{
+    compile, compile_with_options, compile_with_source, CompileError, CompileOptions,
+};
 pub use error::{Cancelled, ExitRequest, RuntimeError};
 pub use host::{Declaration, FsOp, Host, Prop};
 pub use stdlib::{BuiltinFn, Globals, NativeFn};

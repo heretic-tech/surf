@@ -42,7 +42,8 @@ pub enum TokenKind {
     Int(i64),
     /// Float literal.
     Float(f64),
-    /// String literal with interpolation parts.
+    /// String literal with interpolation parts. A raw string (`r"…"`) is
+    /// a single `Lit` part: no escapes, no interpolation.
     Str(Vec<StrPart>),
     /// Duration literal in milliseconds-precision units (`500ms`, `2s`, `3m`, `1h`).
     Duration(std::time::Duration),
@@ -150,6 +151,16 @@ pub enum TokenKind {
     Slash,
     /// `%`
     Percent,
+    /// `+=`
+    PlusEq,
+    /// `-=`
+    MinusEq,
+    /// `*=`
+    StarEq,
+    /// `/=`
+    SlashEq,
+    /// `%=`
+    PercentEq,
 }
 
 /// Every reserved keyword, for `did you mean` suggestions.
@@ -269,6 +280,11 @@ impl TokenKind {
             TokenKind::Star => "*",
             TokenKind::Slash => "/",
             TokenKind::Percent => "%",
+            TokenKind::PlusEq => "+=",
+            TokenKind::MinusEq => "-=",
+            TokenKind::StarEq => "*=",
+            TokenKind::SlashEq => "/=",
+            TokenKind::PercentEq => "%=",
             _ => return None,
         })
     }

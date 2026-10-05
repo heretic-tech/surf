@@ -1,0 +1,33 @@
+# `spawn f()` where f is a closure value goes to Host::spawn_value; a
+# declared fn / task still goes to Host::spawn by name.
+fn declared(n):
+    return n * 2
+
+f = fn(n): n + 1
+h1 = spawn declared(20)
+h2 = spawn f(41)
+print(h1.join(), h2.join())
+
+fn make(k):
+    return fn(n): n * k
+triple = make(3)
+h3 = spawn triple(5)
+print(h3.join())
+
+handlers = {run: fn(): "from map"}
+run = handlers.run
+h4 = spawn run()
+print(h4.join())
+
+fn outer():
+    inner = fn(a, b: 10): a + b
+    h = spawn inner(1)
+    return h.join()
+print(outer())
+
+# Something that is not callable fails at spawn time.
+try:
+    bad = 1
+    spawn bad()
+catch e:
+    print("caught:", e.message)

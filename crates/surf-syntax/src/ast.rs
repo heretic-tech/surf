@@ -185,6 +185,16 @@ pub enum StmtKind {
         /// Assigned value.
         value: Expr,
     },
+    /// `target op= value` (`+=`, `-=`, `*=`, `/=`, `%=`). The target is
+    /// evaluated once; `x[f()] += 1` calls `f` a single time.
+    CompoundAssign {
+        /// Assignment target (`Ident`, `Field` or `Index`).
+        target: Expr,
+        /// The arithmetic operator applied (`Add` for `+=`, …).
+        op: BinaryOp,
+        /// Right-hand side.
+        value: Expr,
+    },
     /// `if … elif … else …`.
     If {
         /// `(condition, block)` for the `if` and each `elif`.
@@ -352,7 +362,8 @@ pub enum ExprKind {
     Int(i64),
     /// Float literal.
     Float(f64),
-    /// String literal with `{expr}` interpolation segments.
+    /// String literal with `{expr}` interpolation segments. A raw string
+    /// (`r"…"`) is a single `Lit` segment.
     Str(Vec<StrSegment>),
     /// Duration literal.
     Duration(Duration),

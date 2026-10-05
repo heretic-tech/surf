@@ -53,6 +53,7 @@ text(sel)  html(sel)  value(sel)  attr(sel, name)
 exists(sel)  count(sel)       # no wait
 all(sel)  first(sel)          # elements: e.text() e.attr(n) e.click() e.type(t) e.all(sel) …
 eval("document.title")        # isolated world, JSON back; eval(fn(a): a + 1, 41)
+eval(r"[...document.images].map(i => i?.src)")   # r"…": raw, no escapes / {}
 screenshot(path, full: true)  pdf(path)
 
 # waiting
@@ -146,6 +147,8 @@ a blank line).
 - The lexer emits `INDENT` / `DEDENT` tokens; the top level is depth 0.
 - Inside `(…)`, `[…]`, `{…}` newlines and indentation are ignored (implicit
   line continuation), so long argument lists and literals may span lines.
+  One exception: a line inside brackets that ends in `):` (a lambda
+  header) followed by a deeper-indented line opens a block lambda (§ 2.8).
 - Each logical line is one statement. There are no semicolons.
 
 ```
@@ -201,6 +204,21 @@ print("url: {page.url()}")
 Strings are immutable. Indexing `s[i]` yields a one-character string;
 `len(s)` counts characters.
 
+**Raw strings** `r"…"` have no escapes and no interpolation: every
+character up to the closing `"` is kept verbatim, so backslashes and
+braces need no doubling. They are the way to hand JavaScript that Surf
+cannot parse (`=>`, `?.`, object literals, template strings) to `eval`,
+and to write regexes and Windows paths:
+
+```
+hrefs = eval(r"[...document.querySelectorAll('a')].map(a => a?.href)")
+wait_url(r"re:^https://x\.example/\d+$")
+read_file(r"C:\Users\me\data.json")
+```
+
+A raw string is still a single line and cannot contain `"` (use `'` in
+the JavaScript). Once lexed it is an ordinary string.
+
 ### 1.7 Durations
 
 A number immediately followed by a unit: `ms`, `s`, `m`, `h` (no space).
@@ -218,7 +236,7 @@ click("#a", timeout: 5s)
 
 ```
 +  -  *  /  %     ==  !=  <  <=  >  >=     and  or  not
-=  :  ,  .  ..  ..=  (  )  [  ]  {  }
+=  +=  -=  *=  /=  %=     :  ,  .  ..  ..=  (  )  [  ]  {  }
 ```
 
 ---
@@ -322,8 +340,32 @@ handler = fn(e):
 `fn(params): expr` is a single-expression lambda (the expression ends at the
 end of the line). `fn(params):` followed by an indented block is a block
 lambda. Lambdas capture variables by reference (closures). A block lambda
-is only possible where the `:` ends a line — not inside `(…)` / `[…]` /
-`{…}`, where newlines are ignored.
+ends its logical line: the next line is a new statement, never an operand
+or an index of the lambda (`f = fn(x):` + block, then `[1, 2].each(f)`).
+
+A block lambda may also be an **argument**: inside `(…)` / `[…]` / `{…}`,
+a line ending in `):` followed by a deeper-indented line opens the block,
+which lasts until a line indented at or below the header (the `)` /
+`, next_arg` line) or until the bracket that holds it closes on the
+block's last line. Only `):` opens such a block — `key:` map entries and
+keyword arguments never do.
+
+```
+xs.each(fn(x):
+    print(x))
+
+result = apply(fn(x):
+    if x > 1:
+        return "big"
+    return "small"
+, 2)
+
+handlers = {greet: fn(name):
+    print("hi", name)}
+```
+
+The body is parsed as Surf; a block lambda handed to `eval` must
+therefore be valid Surf (its text is still sent verbatim, § 5.2).
 
 Because blocks do not introduce scopes (§ 3.1), closures created in a loop
 all share the loop variable: `for i in 1..=3: fs.push(fn(): i)` yields three
@@ -348,7 +390,26 @@ new scope; functions do. Assigning to a name captured from an enclosing
 function updates the captured variable (closures share). There is no `let`,
 `const`, `var`.
 
-Compound assignment (`+=`) does not exist in v0.1.
+A variable exists from the start of its function but holds no value until
+the first assignment runs; reading it before that is the runtime error
+`variable `x` used before assignment` (not `nil`). This catches a read
+that only some branch assigns:
+
+```
+if exists(".price"):
+    price = text(".price")
+print(price)            # error when the element was missing
+```
+
+Start it empty on purpose with `price = nil` before the `if`. A closure
+that captures a variable before its assignment sees `nil` until the
+assignment happens (the cell is shared).
+
+**Compound assignment** `+= -= *= /= %=` works on the same targets and
+applies the operator to the current value: `x += 1`, `m.count *= 2`,
+`xs[i] -= 1`, `s += "!"`. The receiver and index of a field / index
+target are evaluated once (`xs[next()] += 1` calls `next` once). The
+target must already hold a value (`total = 0` before `total += n`).
 
 ### 3.2 Expression statements
 
@@ -808,7 +869,11 @@ print(h.join())      # waits; re-raises the task's error
 ```
 
 `spawn <callee>(<args>)` runs a `fn`, `task` or `actor` concurrently on
-its own task (own VM, shared globals) and returns a handle: `h.join()`
+its own task (own VM, shared globals) and returns a handle. The callee may
+also be a closure held in a variable or produced by an expression
+(`f = fn(n): n + 1` then `spawn f(41)`; in `spawn make(3)(5)` the call
+`make(3)` runs first and the closure it returns is spawned with `5`).
+`h.join()`
 waits and returns the body's value or re-raises its error, `h.cancel()`
 stops it (a pending action is abandoned, its private page closed; a later
 `join()` raises a catchable `cancelled` error), `h.send(msg)` posts to its
@@ -974,13 +1039,17 @@ read_file write_file append_file env fail sleep print assert`
 
 `now()` returns milliseconds since the epoch. `random()` returns a float in
 `[0, 1)`; `random(n)` an int in `[0, n)`; `random(a, b)` an int in `[a, b)`.
+Both read the clock / seed through the host (`Host::now`,
+`Host::random_seed`), so an embedder without `std::time` (the wasm build)
+supplies its own.
 `env("NAME")` is `nil` when unset (`env("NAME", default)` for a fallback).
 `assert(cond, msg)` raises `assertion failed: msg`. `fail(msg, selector:
 …, cdp_method: …)` raises an error with those fields. Builtins reject
 unknown keyword arguments by name.
 
 The first fourteen are also **methods** on their first argument
-(`len(xs)` ≡ `xs.len()`), alongside:
+(`len(xs)` ≡ `xs.len()`; the free function forwards to the method, so the
+two forms share one implementation and one error message), alongside:
 
 | receiver | methods |
 |----------|---------|
@@ -1024,7 +1093,8 @@ block       := NEWLINE INDENT stmt+ DEDENT
 stmt        := simple NEWLINE | compound
 simple      := assign | "return" expr? | "break" | "continue"
              | "emit" expr | "exit" ("(" expr ")")? | expr
-assign      := place "=" expr               place := IDENT | postfix "." IDENT | postfix "[" expr "]"
+assign      := place ("=" | "+=" | "-=" | "*=" | "/=" | "%=") expr
+place       := IDENT | postfix "." IDENT | postfix "[" expr "]"
 compound    := "if" expr ":" block ("elif" expr ":" block)* ("else" ":" block)?
              | "for" IDENT "in" expr ":" block
              | "parallel" "for" IDENT "in" expr ":" NEWLINE INDENT prop* stmt+ DEDENT
@@ -1044,7 +1114,7 @@ mul         := unary (("*" | "/" | "%") unary)*
 unary       := "-" unary | "spawn" postfix | postfix
 postfix     := primary ( "(" args? ")" | "." IDENT ("(" args? ")")? | "[" expr "]" )*
 args        := arg ("," arg)* ","?           arg := (IDENT ":")? expr
-primary     := INT | FLOAT | STRING | DURATION | "true" | "false" | "nil"
+primary     := INT | FLOAT | STRING | RAW_STRING | DURATION | "true" | "false" | "nil"
              | IDENT | "(" expr ")" | list | map | lambda
 list        := "[" (expr ("," expr)* ","?)? "]"
 map         := "{" (entry ("," entry)* ","?)? "}"
@@ -1067,7 +1137,13 @@ Notes for the parser:
   The lexer enforces this: the next non-blank line must be indented
   deeper (`expected an indented block after ':'`), and a deeper line not
   preceded by such a header is `unexpected indentation`. `if x: print(1)`
-  on one line is an error.
+  on one line is an error. Inside brackets only `):` followed by a deeper
+  line opens a block (a block lambda argument, § 2.8); the block closes at
+  the first line indented at or below the header, or when the enclosing
+  bracket closes.
+- A block lambda ends its expression: the parser applies no postfix
+  (`[`, `(`, `.`) or infix operator after a `fn(…):` + block, so the next
+  line is the next statement.
 - `task`, `actor`, `supervisor` and `browser:` are top-level only; `fn` may
   nest in any block.
 - The parser reports every error it finds (recovering at the next line)

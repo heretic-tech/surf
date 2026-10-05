@@ -1,0 +1,48 @@
+# Compound assignment on names, fields and indexes.
+x = 10
+x += 5
+x -= 3
+x *= 2
+x /= 4
+x %= 4
+print(x)
+
+s = "ab"
+s += "cd"
+print(s)
+
+m = {count: 1, nested: {n: 2}}
+m.count += 41
+m.nested.n *= 10
+print(m)
+
+xs = [1, 2, 3]
+xs[0] += 10
+xs[-1] -= 1
+print(xs)
+
+# The target's receiver and index are evaluated once.
+calls = 0
+fn idx():
+    calls += 1
+    return 1
+xs[idx()] *= 100
+print(xs, calls)
+
+# Inside a function a compound assignment on an outer variable updates it.
+total = 0
+fn add(n):
+    total += n
+add(2)
+add(3)
+print(total)
+
+# A compound assignment on a name nothing has assigned is an error.
+try:
+    missing += 1
+catch e:
+    print("caught:", e.message)
+
+f = 1.5
+f *= 2
+print(f)

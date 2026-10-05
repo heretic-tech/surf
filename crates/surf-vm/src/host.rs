@@ -123,6 +123,18 @@ pub trait Host {
     /// `self`, task/actor names, …). `None` → undefined-variable error.
     fn resolve_global(&self, name: &str) -> Option<Value>;
 
+    /// Store a top-level assignment as a host global. Only emitted when the
+    /// program was compiled with `CompileOptions::top_level_globals` (the
+    /// REPL: `x = 1` on one line, `x` on the next, resolved back through
+    /// [`Host::resolve_global`]). Hosts without a global store keep the
+    /// default, which errors.
+    fn set_global(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
+        let _ = value;
+        Err(RuntimeError::new(format!(
+            "cannot assign global `{name}`: this host has no global store"
+        )))
+    }
+
     /// Call a global function the VM does not know — bare actions
     /// (`goto`, `click`, …), `page(n)`, `env(...)`, `shift_proxy()`, tasks.
     fn call_global<'a>(
@@ -158,6 +170,23 @@ pub trait Host {
         Box::pin(async move { Err(RuntimeError::new(msg)) })
     }
 
+    /// `spawn f(args)` where `f` is a closure value rather than a declared
+    /// name (`f = fn(): …` then `spawn f()`), or any other callable value.
+    /// Hosts that do not support it keep the default, which errors.
+    fn spawn_value<'a>(
+        &'a self,
+        vm: &'a mut Vm,
+        callee: Value,
+        args: Args,
+    ) -> LocalBoxFuture<'a, Result<Value, RuntimeError>> {
+        let _ = (vm, args);
+        let msg = format!(
+            "spawn of a {} value is not supported by this host (spawn a declared fn, task or actor by name)",
+            callee.type_name()
+        );
+        Box::pin(async move { Err(RuntimeError::new(msg)) })
+    }
+
     /// `parallel for x in items:` — run `body(item)` concurrently, honouring
     /// `limit` / `fail_fast` in `opts`. Resolves when all items finished.
     fn parallel_for<'a>(
@@ -182,4 +211,26 @@ pub trait Host {
 
     /// `env("NAME")`.
     fn env(&self, name: &str) -> Option<String>;
+
+    /// Wall-clock time as milliseconds since the Unix epoch (`now()`). The
+    /// default reads `std::time::SystemTime`, which compiles on
+    /// `wasm32-unknown-unknown` but panics there at runtime — a wasm host
+    /// overrides it (`Date.now()`).
+    fn now(&self) -> f64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64() * 1000.0)
+            .unwrap_or(0.0)
+    }
+
+    /// Seed for `random()`'s generator, drawn once per thread. The default
+    /// mixes the clock's nanoseconds; a wasm host overrides it
+    /// (`crypto.getRandomValues`).
+    fn random_seed(&self) -> u64 {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        nanos ^ 0x9E37_79B9_7F4A_7C15
+    }
 }

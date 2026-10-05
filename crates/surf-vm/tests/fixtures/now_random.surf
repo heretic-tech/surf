@@ -1,0 +1,19 @@
+# `now()` and `random()` go through the host (a frozen clock and a fixed
+# seed in this harness).
+print(now())
+print(type(now()), type(random()), type(random(10)))
+r = random()
+print(r >= 0 and r < 1)
+ok = true
+for i in 1..100:
+    n = random(3)
+    if n < 0 or n > 2:
+        ok = false
+    m = random(5, 8)
+    if m < 5 or m > 7:
+        ok = false
+print(ok)
+try:
+    random(0)
+catch e:
+    print("caught:", e.message)

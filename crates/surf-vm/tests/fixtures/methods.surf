@@ -1,0 +1,27 @@
+# Every string / list / map builtin is one implementation reachable both
+# as a free function and as a method.
+s = "  Hello, World  "
+print(upper(s) == s.upper(), lower(s) == s.lower(), trim(s) == s.trim())
+print(len(s), s.len(), len("héllo"), "héllo".len())
+print(split("a,b,c", ","), "a,b,c".split(","))
+print(contains("abc", "b"), "abc".contains("b"), starts_with("abc", "a"), "abc".ends_with("c"))
+print(replace("a-b", "-", "+"), "a-b".replace("-", "+"))
+
+xs = [3, 1, 2]
+push(xs, 4)
+xs.push(5)
+print(xs, len(xs), xs.len(), pop(xs), xs.pop(), xs)
+print(join(["a", "b"], "/"), ["a", "b"].join("/"))
+print([1, 2].map(fn(x): x * 2), [1, 2, 3].filter(fn(x): x > 1), [2, 1].sort())
+[1, 2].each(fn(x): print("each", x))
+
+m = {a: 1, b: 2}
+print(keys(m), m.keys(), values(m), m.values(), len(m), m.len())
+print(m.get("a"), m.get("z", 0), m.has("b"), m.entries())
+{c: 3}.keys().each(fn(k): print("key", k))
+
+# Unknown names on each type list what is available.
+try:
+    "x".nope()
+catch e:
+    print("caught:", e.message)

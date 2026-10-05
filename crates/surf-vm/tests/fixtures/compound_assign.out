@@ -1,0 +1,10 @@
+[declare] fn idx()
+[declare] fn add(n)
+2
+abcd
+{"count":42,"nested":{"n":20}}
+[11,2,2]
+[11,200,2] 1
+5
+caught: variable `missing` used before assignment
+3.0

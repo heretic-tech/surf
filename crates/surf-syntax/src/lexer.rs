@@ -5,12 +5,17 @@
 //! - A line ending in `:` opens a block; the next non-blank line must be
 //!   indented deeper and establishes the block's indentation level.
 //! - Blank lines and comment-only lines never affect indentation.
-//! - Newlines inside `(…)`, `[…]`, `{…}` are ignored (implicit continuation).
+//! - Newlines inside `(…)`, `[…]`, `{…}` are ignored (implicit continuation)
+//!   — except for a *block lambda argument*: a line that ends in `):`
+//!   inside brackets, followed by a deeper-indented line, opens a layout
+//!   block (`NEWLINE INDENT … DEDENT`) that lasts until a line indented at
+//!   or below the header, or the bracket that holds it closes.
 //! - `#` starts a comment to end of line; a leading `#!` shebang is a comment.
 //! - Duration literals: a number followed immediately by `ms`, `s`, `m`, `h`.
 //! - Strings are lexed into [`StrPart`]s; each `{expr}` part is kept as raw
 //!   source (with its span) and lexed again by the parser via
-//!   [`lex_expr`].
+//!   [`lex_expr`]. Raw strings `r"…"` have no escapes and no
+//!   interpolation.
 //!
 //! The lexer collects every error it can recover from (unknown characters,
 //! bad escapes, bad indentation) and returns them together; the parser only
@@ -40,6 +45,16 @@ pub fn lex_expr(name: &str, source: &str, span: Span) -> Result<Vec<Token>, Diag
     lx.run()
 }
 
+/// A layout block opened inside brackets (a block lambda argument).
+struct LayoutBlock {
+    /// `brackets.len()` when the block opened; newlines are live only
+    /// while the bracket depth is exactly this.
+    depth: usize,
+    /// `indent_stack.len()` when the block opened; closing the block pops
+    /// the indentation stack back to it.
+    indent_len: usize,
+}
+
 /// Lexer state.
 pub struct Lexer<'src> {
     source: &'src str,
@@ -51,9 +66,20 @@ pub struct Lexer<'src> {
     indent_stack: Vec<usize>,
     /// Open brackets `(`, `[`, `{` with their offsets.
     brackets: Vec<(char, usize)>,
+    /// Layout blocks opened inside brackets, innermost last.
+    layout: Vec<LayoutBlock>,
     at_line_start: bool,
+    /// Offset of the current physical line's first character.
+    line_start: usize,
+    /// Indentation of the current physical line (any line, also inside
+    /// brackets).
+    line_indent: usize,
     /// The previous logical line ended in `:` — the next one must be deeper.
     pending_block: Option<Span>,
+    /// A line inside brackets ended in `):` — if the next line is deeper
+    /// than the header (second field), a layout block opens there and the
+    /// suppressed newline (first field) is emitted after all.
+    pending_bracket_block: Option<(Span, usize)>,
     /// Expression mode: no layout tokens at all (string interpolation).
     expr_mode: bool,
     tab_reported: bool,
@@ -70,8 +96,12 @@ impl<'src> Lexer<'src> {
             diags: Diagnostics::new(name),
             indent_stack: vec![0],
             brackets: Vec::new(),
+            layout: Vec::new(),
             at_line_start: true,
+            line_start: 0,
+            line_indent: 0,
             pending_block: None,
+            pending_bracket_block: None,
             expr_mode: false,
             tab_reported: false,
         }
@@ -122,11 +152,17 @@ impl<'src> Lexer<'src> {
         self.tokens.last().map(|t| &t.kind)
     }
 
+    /// Whether newlines and indentation matter here: outside brackets, or
+    /// inside a bracketed layout block at exactly its bracket depth.
+    fn layout_live(&self) -> bool {
+        self.brackets.len() == self.layout.last().map_or(0, |l| l.depth)
+    }
+
     // ---- main loop ----------------------------------------------------
 
     fn lex_all(&mut self) {
         loop {
-            if self.at_line_start && self.brackets.is_empty() && !self.expr_mode {
+            if self.at_line_start && self.layout_live() && !self.expr_mode {
                 self.handle_indentation();
                 if self.pos >= self.end {
                     break;
@@ -149,13 +185,24 @@ impl<'src> Lexer<'src> {
                 }
                 '\n' => {
                     self.bump();
-                    if self.brackets.is_empty() && !self.expr_mode {
-                        self.end_line(start);
+                    if !self.expr_mode {
+                        if self.layout_live() {
+                            self.end_line(start);
+                        } else if self.ends_with_lambda_header() {
+                            let nl = Span::new(start as u32, self.pos as u32);
+                            self.pending_bracket_block = Some((nl, self.line_indent));
+                        }
                     }
                     self.at_line_start = true;
+                    self.line_start = self.pos;
                     continue;
                 }
                 _ => {}
+            }
+            if self.at_line_start && !self.expr_mode && !self.layout_live() {
+                // First token of a continuation line inside brackets.
+                self.line_indent = self.pos - self.line_start;
+                self.open_bracket_block();
             }
             // A real token: this physical line is no longer "at its start"
             // (matters on continuation lines inside brackets, so the `\n`
@@ -163,6 +210,7 @@ impl<'src> Lexer<'src> {
             self.at_line_start = false;
             match c {
                 '"' => self.lex_string(),
+                'r' if self.peek_at(1) == Some('"') => self.lex_raw_string(),
                 c if c.is_ascii_digit() => self.lex_number(),
                 c if c.is_ascii_alphabetic() || c == '_' => self.lex_ident(),
                 _ => self.lex_punct(),
@@ -223,6 +271,48 @@ impl<'src> Lexer<'src> {
             Span::new(nl_start as u32, self.pos as u32),
         );
         self.pending_block = header;
+    }
+
+    /// The tokens so far end in `):` — a lambda header (`fn(x):`) inside
+    /// brackets. Map keys and keyword arguments end in `name:` and never
+    /// open a block.
+    fn ends_with_lambda_header(&self) -> bool {
+        let n = self.tokens.len();
+        n >= 2
+            && self.tokens[n - 1].kind == TokenKind::Colon
+            && self.tokens[n - 2].kind == TokenKind::RParen
+    }
+
+    /// At the first token of a continuation line inside brackets: if the
+    /// previous line was a lambda header and this line is indented deeper
+    /// than it, open a layout block (`NEWLINE INDENT`).
+    fn open_bracket_block(&mut self) {
+        let Some((nl, header_indent)) = self.pending_bracket_block.take() else {
+            return;
+        };
+        if self.line_indent <= header_indent {
+            return;
+        }
+        self.push_at(TokenKind::Newline, nl);
+        self.layout.push(LayoutBlock {
+            depth: self.brackets.len(),
+            indent_len: self.indent_stack.len(),
+        });
+        self.indent_stack.push(self.line_indent);
+        self.push_at(
+            TokenKind::Indent,
+            Span::new(self.line_start as u32, self.pos as u32),
+        );
+    }
+
+    /// Close the innermost bracketed layout block: pop its indentation
+    /// levels (one `DEDENT` each).
+    fn close_layout_block(&mut self) {
+        let Some(lb) = self.layout.pop() else { return };
+        while self.indent_stack.len() > lb.indent_len {
+            self.indent_stack.pop();
+            self.push_at(TokenKind::Dedent, Span::at(self.pos as u32));
+        }
     }
 
     fn skip_comment(&mut self) {
@@ -286,6 +376,7 @@ impl<'src> Lexer<'src> {
             return;
         }
         self.at_line_start = false;
+        self.line_indent = width;
         let ws = Span::new(line_start as u32, self.pos as u32);
         let current = *self
             .indent_stack
@@ -318,6 +409,15 @@ impl<'src> Lexer<'src> {
         }
         if width == current {
             return;
+        }
+        if let Some(lb) = self.layout.last() {
+            if width < self.indent_stack[lb.indent_len] {
+                // Back at (or before) the lambda header's indentation: the
+                // block lambda is over and the rest of this line continues
+                // the bracketed expression (`)`, `, next_arg)`, …).
+                self.close_layout_block();
+                return;
+            }
         }
         let levels: Vec<String> = self.indent_stack.iter().map(|l| l.to_string()).collect();
         while *self.indent_stack.last().expect("non-empty") > width {
@@ -544,6 +644,34 @@ impl<'src> Lexer<'src> {
         self.push(TokenKind::Str(parts), start);
     }
 
+    /// `r"…"`: no escapes, no interpolation, single line.
+    fn lex_raw_string(&mut self) {
+        let start = self.pos;
+        self.bump(); // r
+        self.bump(); // opening quote
+        let text_start = self.pos;
+        loop {
+            match self.peek() {
+                None | Some('\n') => {
+                    self.unclosed_string(start);
+                    return;
+                }
+                Some('"') => break,
+                Some(_) => {
+                    self.bump();
+                }
+            }
+        }
+        let text = &self.source[text_start..self.pos];
+        let parts = if text.is_empty() {
+            Vec::new()
+        } else {
+            vec![StrPart::Lit(text.to_string())]
+        };
+        self.bump(); // closing quote
+        self.push(TokenKind::Str(parts), start);
+    }
+
     fn unclosed_string(&mut self, start: usize) {
         let span = Span::new(start as u32, self.pos as u32);
         self.error(
@@ -630,6 +758,16 @@ impl<'src> Lexer<'src> {
                 }
             }
             ')' | ']' | '}' => {
+                if self
+                    .layout
+                    .last()
+                    .is_some_and(|lb| lb.depth == self.brackets.len())
+                {
+                    // The bracket holding a block lambda closes on the
+                    // block's last line: end the line and the block first.
+                    self.push_at(TokenKind::Newline, Span::at(start as u32));
+                    self.close_layout_block();
+                }
                 self.close_bracket(c, start);
                 match c {
                     ')' => TokenKind::RParen,
@@ -650,11 +788,11 @@ impl<'src> Lexer<'src> {
             '=' => two(self, '=', TokenKind::EqEq, TokenKind::Eq),
             '<' => two(self, '=', TokenKind::LtEq, TokenKind::Lt),
             '>' => two(self, '=', TokenKind::GtEq, TokenKind::Gt),
-            '+' => TokenKind::Plus,
-            '-' => TokenKind::Minus,
-            '*' => TokenKind::Star,
-            '/' => TokenKind::Slash,
-            '%' => TokenKind::Percent,
+            '+' => two(self, '=', TokenKind::PlusEq, TokenKind::Plus),
+            '-' => two(self, '=', TokenKind::MinusEq, TokenKind::Minus),
+            '*' => two(self, '=', TokenKind::StarEq, TokenKind::Star),
+            '/' => two(self, '=', TokenKind::SlashEq, TokenKind::Slash),
+            '%' => two(self, '=', TokenKind::PercentEq, TokenKind::Percent),
             '!' => {
                 if self.peek() == Some('=') {
                     self.bump();

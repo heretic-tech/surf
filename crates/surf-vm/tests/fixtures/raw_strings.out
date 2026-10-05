@@ -1,0 +1,5 @@
+document.querySelectorAll('a').map(a => a?.href)
+C:\Users\{name}\n 2
+
+x{name}
+["a","b","c"] {A}

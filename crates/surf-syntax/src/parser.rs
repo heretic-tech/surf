@@ -926,23 +926,32 @@ impl<'src> Parser<'src> {
             }
             _ => {
                 let expr = self.parse_expr()?;
-                if self.at(&TokenKind::Eq) {
+                let compound = compound_op(self.peek());
+                if self.at(&TokenKind::Eq) || compound.is_some() {
                     if !matches!(
                         expr.kind,
                         ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. }
                     ) {
+                        let op = self.peek().punct_text().unwrap_or("=");
                         return Err(self.err(
                             Diagnostic::error("invalid assignment target", expr.span)
                                 .with_label("cannot assign to this expression")
-                                .with_help("assign to a name (`x = …`), a field (`m.k = …`) or an index (`xs[0] = …`)"),
+                                .with_help(format!("assign to a name (`x {op} …`), a field (`m.k {op} …`) or an index (`xs[0] {op} …`)")),
                         ));
                     }
                     self.advance();
                     let value = self.parse_expr()?;
                     self.end_stmt(None)?;
-                    StmtKind::Assign {
-                        target: expr,
-                        value,
+                    match compound {
+                        Some(op) => StmtKind::CompoundAssign {
+                            target: expr,
+                            op,
+                            value,
+                        },
+                        None => StmtKind::Assign {
+                            target: expr,
+                            value,
+                        },
                     }
                 } else {
                     self.end_stmt(Some(&expr))?;
@@ -1187,6 +1196,11 @@ impl<'src> Parser<'src> {
 
     fn parse_bp(&mut self, min_bp: u8) -> PResult<Expr> {
         let mut lhs = self.parse_prefix()?;
+        if is_block_lambda(&lhs) {
+            // The indented body closed the line; whatever follows is the
+            // next statement, not an operand.
+            return Ok(lhs);
+        }
         while let Some((lbp, rbp, op)) = binary_op(self.peek()) {
             if lbp < min_bp {
                 break;
@@ -1279,6 +1293,11 @@ impl<'src> Parser<'src> {
 
     fn parse_postfix(&mut self) -> PResult<Expr> {
         let mut expr = self.parse_primary()?;
+        if is_block_lambda(&expr) {
+            // `f = fn(x):` + block, then `[1, 2].each(f)` on the next line:
+            // the `[` starts a statement, it does not index the lambda.
+            return Ok(expr);
+        }
         loop {
             match self.peek() {
                 TokenKind::LParen => {
@@ -1568,6 +1587,30 @@ impl<'src> Parser<'src> {
             _ => Err(self.unexpected(what)),
         }
     }
+}
+
+/// A lambda whose body is an indented block: it ends the logical line, so
+/// no postfix or infix operator can follow it.
+fn is_block_lambda(e: &Expr) -> bool {
+    matches!(
+        &e.kind,
+        ExprKind::Lambda {
+            body: LambdaBody::Block(_),
+            ..
+        }
+    )
+}
+
+/// The operator a compound assignment token applies (`+=` → `Add`).
+fn compound_op(kind: &TokenKind) -> Option<BinaryOp> {
+    Some(match kind {
+        TokenKind::PlusEq => BinaryOp::Add,
+        TokenKind::MinusEq => BinaryOp::Sub,
+        TokenKind::StarEq => BinaryOp::Mul,
+        TokenKind::SlashEq => BinaryOp::Div,
+        TokenKind::PercentEq => BinaryOp::Rem,
+        _ => return None,
+    })
 }
 
 #[derive(Debug, Clone, Copy)]

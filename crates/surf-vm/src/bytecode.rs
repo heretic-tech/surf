@@ -27,6 +27,9 @@ pub enum Op {
     Pop,
     /// Duplicate the top of stack.
     Dup,
+    /// Duplicate the top two values (`a b` → `a b a b`; compound index
+    /// assignment evaluates receiver and index once).
+    Dup2,
     /// Push local slot.
     GetLocal(u32),
     /// Pop into local slot.
@@ -37,6 +40,10 @@ pub enum Op {
     SetUpvalue(u32),
     /// Push a global by constant-name index (host → stdlib fallback).
     GetGlobal(u32),
+    /// Pop into a host global by constant-name index (`Host::set_global`);
+    /// emitted for top-level assignments under
+    /// `CompileOptions::top_level_globals` (the REPL).
+    SetGlobal(u32),
     /// Build list of top `n` values.
     List(u32),
     /// Build map of top `2n` values (key, value pairs).
@@ -138,6 +145,15 @@ pub enum Op {
         /// Keyword arg count.
         kwargs: u32,
     },
+    /// `spawn callee(args)` where the callee is a value (a closure in a
+    /// local, `spawn f()`): callee below the args, dispatched to
+    /// `Host::spawn_value`.
+    SpawnValue {
+        /// Positional arg count.
+        positional: u32,
+        /// Keyword arg count.
+        kwargs: u32,
+    },
     /// `parallel for`: items, body closure, then `kwargs` `(name, value)`
     /// option pairs on the stack.
     ParallelFor {
@@ -197,6 +213,10 @@ pub struct UpvalueDesc {
 pub struct Chunk {
     /// Instructions.
     pub code: Vec<Op>,
+    /// Names of the local slots (parameters first), for the `used before
+    /// assignment` diagnostic. May be shorter than `Function::locals` for
+    /// hand-built functions.
+    pub local_names: Vec<Rc<str>>,
     /// Constant pool.
     pub constants: Vec<Value>,
     /// One span per instruction (same length as `code`).

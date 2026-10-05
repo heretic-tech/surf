@@ -1,0 +1,47 @@
+# v0.2 language additions: compound assignment, raw strings for JS that
+# Surf cannot parse, block lambdas as arguments, a statement that starts
+# with a literal after a block lambda, and `used before assignment`.
+base = env("SURF_E2E_BASE")
+goto("{base}/forms.html")
+
+# Raw strings: no escapes, no {} interpolation — arrow functions and
+# object literals go to eval as-is.
+print(eval(r"[...document.querySelectorAll('input')].map(i => i.type).join(',')"))
+emit eval(r"({a: 1, b: [1, 2, 'x'], c: null})")
+print(eval(r"document.title?.length"))
+
+# Compound assignment on names, fields and indexes.
+count = 0
+kinds = {}
+for i in all("input"):
+    count += 1
+    k = i.attr("type")
+    if not kinds.has(k):
+        kinds[k] = 0
+    kinds[k] += 1
+print(count, kinds)
+
+# Block lambdas inside brackets.
+all("input").each(fn(i):
+    if i.attr("type") == "text":
+        print("text input:", i.attr("id")))
+
+names = all("input").map(fn(i):
+    n = i.attr("id")
+    return n.upper()
+)
+print(names)
+
+# A block lambda ends its line: the next statement may start with `[`.
+show = fn(x):
+    print("item", x)
+[1, 2].each(show)
+{k: 1}.keys().each(show)
+
+# Reading a variable before its first assignment is an error, not nil.
+try:
+    if false:
+        price = text(".price")
+    print(price)
+catch e:
+    print("caught:", e.message)

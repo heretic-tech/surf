@@ -1,0 +1,13 @@
+[declare] fn early()
+[declare] fn maybe(flag)
+[declare] fn safe(flag)
+[declare] fn capture()
+[declare] fn params(a, b)
+caught: variable `later` used before assignment
+set
+caught: variable `v` used before assignment
+nil
+nil
+7
+3
+error: variable `top` used before assignment (line 49)

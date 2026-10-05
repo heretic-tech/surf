@@ -1,0 +1,9 @@
+# r"…" keeps everything verbatim: no escapes, no {} interpolation.
+js = r"document.querySelectorAll('a').map(a => a?.href)"
+print(js)
+print(r"C:\Users\{name}\n", len(r"\n"))
+print(r"")
+name = "x"
+print("{name}" + r"{name}")
+# Raw strings are ordinary strings afterwards.
+print(r"a,b,c".split(","), r"{a}".upper())

@@ -1,0 +1,11 @@
+---
+source: crates/surf-syntax/tests/parse.rs
+expression: "errors(concat! (\"err_block_lambda_in_brackets_dedent\", \".surf\"), src)"
+---
+[31merror:[0m expected `,` or `)` in the argument list, found identifier `print`
+   ╭─[ err_block_lambda_in_brackets_dedent.surf:3:7 ]
+   │
+ 3 │       print(1)
+   │       ──┬──  
+   │         ╰──── expected `,` or `)` in the argument list
+───╯

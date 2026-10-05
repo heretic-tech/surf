@@ -1,0 +1,14 @@
+[declare] fn declared(n)
+[declare] fn make(k)
+[declare] fn outer()
+[spawn] declared
+[spawn value] fn
+40 42
+[spawn value] fn
+15
+[spawn value] fn
+from map
+[spawn value] fn
+11
+[spawn value] int
+caught: cannot call a value of type int

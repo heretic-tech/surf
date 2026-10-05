@@ -1,0 +1,33 @@
+# A block lambda as a call argument: `):` at the end of a line inside
+# brackets followed by a deeper-indented block.
+[1, 2].each(fn(x):
+    print("item", x))
+
+fn apply(f, v):
+    return f(v)
+
+print(apply(fn(x):
+    if x > 1:
+        return "big"
+    return "small"
+, 2))
+
+r = apply(
+    fn(a):
+        b = a * 2
+        return b + 1
+    , 5)
+print(r)
+
+handlers = {greet: fn(name):
+    print("hi", name)}
+handlers.greet("surf")
+
+# Nested block lambdas in nested brackets.
+print(apply(fn(x):
+    return apply(fn(y):
+        return y + x
+    , 10)
+, 1))
+
+print("done")

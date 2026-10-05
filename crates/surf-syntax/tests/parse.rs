@@ -213,7 +213,75 @@ fn expr_lambdas() {
     );
 }
 
+#[test]
+fn expr_block_lambda_in_brackets() {
+    // A `):` line inside brackets followed by a deeper line opens a layout
+    // block; the bracket may close on the block's last line or on its own
+    // line, and further arguments may follow.
+    ast_snapshot!(
+        "expr_block_lambda_in_brackets",
+        "xs.each(fn(x):\n\
+         \x20   print(x))\n\
+         apply(fn(x):\n\
+         \x20   if x > 1:\n\
+         \x20       return x\n\
+         \x20   return 0\n\
+         , 2)\n\
+         result = outer(\n\
+         \x20   fn(a):\n\
+         \x20       inner(fn(b):\n\
+         \x20           a + b\n\
+         \x20       )\n\
+         )\n\
+         m = {handler: fn(e):\n\
+         \x20   print(e)}\n\
+         print(\"done\")\n"
+    );
+}
+
+#[test]
+fn expr_raw_strings() {
+    ast_snapshot!(
+        "expr_raw_strings",
+        "js = r\"document.querySelectorAll('a').map(a => a?.href)\"\n\
+         path = r\"C:\\Users\\{name}\\n\"\n\
+         empty = r\"\"\n\
+         eval(r\"({a: 1}).a\")\n"
+    );
+}
+
 // ---- § 3 statements ------------------------------------------------------------
+
+#[test]
+fn stmt_compound_assign() {
+    ast_snapshot!(
+        "stmt_compound_assign",
+        "x += 1\n\
+         x -= 2 * y\n\
+         m.count *= 2\n\
+         xs[i + 1] /= 4\n\
+         n %= 3\n"
+    );
+}
+
+#[test]
+fn stmt_after_block_lambda() {
+    // The lambda's block ends the line: `[`, `(` and `-` on the next line
+    // start a new statement rather than indexing / calling / subtracting.
+    ast_snapshot!(
+        "stmt_after_block_lambda",
+        "f = fn(x):\n\
+         \x20   print(x)\n\
+         [1, 2].each(f)\n\
+         g = fn():\n\
+         \x20   print(1)\n\
+         (1 + 2).to_str()\n\
+         h = fn():\n\
+         \x20   print(2)\n\
+         -x\n\
+         {a: 1}.keys()\n"
+    );
+}
 
 #[test]
 fn stmt_assign_and_exprs() {
@@ -626,6 +694,29 @@ fn all_errors_are_reported_together() {
 }
 
 // ---- error rendering ---------------------------------------------------------------------
+
+#[test]
+fn err_compound_assign_target() {
+    error_snapshot!("err_compound_assign_target", "f(x) += 1\n");
+}
+
+#[test]
+fn err_raw_string_unclosed() {
+    error_snapshot!("err_raw_string_unclosed", "x = r\"abc\ny = 1\n");
+}
+
+#[test]
+fn err_block_lambda_in_brackets_dedent() {
+    // The body dedents to a level that is deeper than the header but
+    // matches no block level inside it.
+    error_snapshot!(
+        "err_block_lambda_in_brackets_dedent",
+        "apply(fn(x):\n\
+         \x20       print(x)\n\
+         \x20     print(1)\n\
+         )\n"
+    );
+}
 
 #[test]
 fn err_tab_indent() {

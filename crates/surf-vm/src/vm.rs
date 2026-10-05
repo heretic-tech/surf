@@ -23,11 +23,14 @@ use std::rc::Rc;
 use std::time::Duration;
 use surf_syntax::ast::{BinaryOp, UnaryOp};
 
-/// One stack slot: a plain value, or a cell shared with a closure.
+/// One stack slot: a plain value, a cell shared with a closure, or a local
+/// that nothing has assigned yet (reading it is the `used before
+/// assignment` error).
 #[derive(Clone)]
 enum Slot {
     Val(Value),
     Boxed(Upvalue),
+    Unset,
 }
 
 impl Slot {
@@ -35,6 +38,7 @@ impl Slot {
         match self {
             Slot::Val(v) => v.clone(),
             Slot::Boxed(b) => b.borrow().clone(),
+            Slot::Unset => Value::Nil,
         }
     }
 
@@ -42,6 +46,7 @@ impl Slot {
         match self {
             Slot::Val(x) => *x = v,
             Slot::Boxed(b) => *b.borrow_mut() = v,
+            Slot::Unset => *self = Slot::Val(v),
         }
     }
 }
@@ -285,8 +290,11 @@ impl Vm {
         let slot = self.local_slot(i);
         match slot {
             Slot::Boxed(b) => b.clone(),
-            Slot::Val(v) => {
-                let b = Rc::new(RefCell::new(v.clone()));
+            // A captured-before-assigned local starts as `nil` in the cell:
+            // the closure may run before the assignment and the sentinel
+            // does not travel into upvalues.
+            Slot::Val(_) | Slot::Unset => {
+                let b = Rc::new(RefCell::new(slot.get()));
                 *slot = Slot::Boxed(b.clone());
                 b
             }
@@ -318,9 +326,15 @@ impl Vm {
             self.push(v);
         }
         for i in given..(func.locals as usize) {
-            self.push(Value::Nil);
-            if i < nparams && i < 64 {
-                missing |= 1 << i;
+            if i < nparams {
+                // A parameter: bound below by a keyword, a default or the
+                // missing-argument error.
+                self.push(Value::Nil);
+                if i < 64 {
+                    missing |= 1 << i;
+                }
+            } else {
+                self.stack.push(Slot::Unset);
             }
         }
         for (k, v) in args.kwargs {
@@ -413,7 +427,29 @@ impl Vm {
                 let v = self.peek();
                 self.push(v);
             }
+            Op::Dup2 => {
+                let n = self.stack.len();
+                let a = self
+                    .stack
+                    .get(n.wrapping_sub(2))
+                    .map_or(Value::Nil, Slot::get);
+                let b = self.peek();
+                self.push(a);
+                self.push(b);
+            }
             Op::GetLocal(i) => {
+                if matches!(self.local_slot(i), Slot::Unset) {
+                    let name = self
+                        .func()
+                        .chunk
+                        .local_names
+                        .get(i as usize)
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| "?".into());
+                    return Err(RuntimeError::new(format!(
+                        "variable `{name}` used before assignment"
+                    )));
+                }
                 let v = self.local_slot(i).get();
                 self.push(v);
             }
@@ -433,6 +469,11 @@ impl Vm {
                 let name = self.const_name(i);
                 let v = self.get_global(&name)?;
                 self.push(v);
+            }
+            Op::SetGlobal(i) => {
+                let name = self.const_name(i);
+                let v = self.pop();
+                self.host.set_global(&name, v)?;
             }
             Op::List(n) => {
                 let items = self.pop_n(n as usize);
@@ -713,6 +754,14 @@ impl Vm {
                 self.check_cancel()?;
                 let host = self.host.clone();
                 let v = host.spawn_method(self, recv, &name, args).await?;
+                self.push(v);
+            }
+            Op::SpawnValue { positional, kwargs } => {
+                let args = self.pop_args(positional, kwargs)?;
+                let callee = self.pop();
+                self.check_cancel()?;
+                let host = self.host.clone();
+                let v = host.spawn_value(self, callee, args).await?;
                 self.push(v);
             }
             Op::ParallelFor { kwargs } => {
